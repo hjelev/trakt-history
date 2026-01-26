@@ -89,10 +89,19 @@ The application will be available at `http://localhost:5000`
 
 ### First-time authentication
 
-On first run, you'll need to authenticate with Trakt:
-1. Visit `http://localhost:5000/refresh`
-2. Follow the authentication flow
-3. Your token will be saved to `trakt.json`
+Before running the app, you need to authenticate with Trakt:
+
+```bash
+python authenticate.py
+```
+
+This will:
+1. Display a URL to visit in your browser
+2. Show a code to enter on the Trakt website
+3. Wait for you to authorize the app
+4. Save your token to `trakt.json`
+
+Once authenticated, you can run the app normally.
 
 ### Update your watch history
 
