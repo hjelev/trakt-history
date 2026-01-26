@@ -1,53 +1,128 @@
-# Trakt Flask Viewer
+# Trakt History Viewer
 
-A minimal Flask app to view your Trakt watch history locally.
+A Flask web application to view and analyze your Trakt.tv watch history locally with filtering, pagination, and statistics.
 
-Requirements
+## Features
+
+- View your complete Trakt watch history (movies & TV episodes)
+- Filter by genre, actor, media type, time period, and release year
+- Search across titles, actors, and years
+- Pagination support
+- Watch statistics and analytics
+- Optional RatingPosterDB thumbnail integration
+
+## Requirements
+
 - Python 3.8+
-- `requests` and `python-dotenv` (install with `pip install -r requirements.txt`)
+- Trakt.tv account
+- Trakt API credentials (Client ID & Secret)
 
-Setup
-1. Copy the example env and fill values:
-Optional: enable RatingPosterDB thumbnails
--------------------------------------------------
-If you have an RPDB API key (from https://ratingposterdb.com/), add it to your `.env`:
+## Installation
+
+### 1. Clone the repository
 
 ```bash
-# in the trakt/ folder
-echo "RPDB_API_KEY=t0-free-rpdb" >> .env
-# or edit trakt/.env and set RPDB_API_KEY=<your_key>
+git clone https://github.com/YOUR_USERNAME/trakt-history.git
+cd trakt-history
 ```
 
-Then run the updater to populate thumbnails:
+### 2. Create a virtual environment
 
 ```bash
-cd trakt
+python3 -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+```
+
+### 3. Install dependencies
+
+```bash
+pip install -r requirements.txt
+```
+
+### 4. Configure environment variables
+
+Copy the example environment file and add your Trakt API credentials:
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` and add your credentials:
+
+```bash
+TRAKT_CLIENT_ID=your_client_id_here
+TRAKT_CLIENT_SECRET=your_client_secret_here
+FLASK_SECRET=your_random_secret_key
+CACHE_DURATION=3600
+PORT=5000
+FLASK_DEBUG=1
+```
+
+**Getting Trakt API Credentials:**
+1. Go to https://trakt.tv/oauth/applications
+2. Create a new application
+3. Copy the Client ID and Client Secret to your `.env` file
+
+### 5. (Optional) Enable RatingPosterDB thumbnails
+
+If you have an RPDB API key from https://ratingposterdb.com/, add it to `.env`:
+
+```bash
+RPDB_API_KEY=your_rpdb_key_here
+```
+
+Then run the updater to fetch thumbnails:
+
+```bash
 python3 scripts/update_trakt_local.py
 ```
 
+## Usage
+
+### Run the application
 
 ```bash
-cp trakt/.env.example trakt/.env
-# edit trakt/.env and add TRAKT_REFRESH_TOKEN if you have it
+python app.py
 ```
 
-2. (Optional) If you want to use the `/refresh` route to fetch fresh data, add:
+The application will be available at `http://localhost:5000`
 
-- `TRAKT_CLIENT_ID`
-- `TRAKT_CLIENT_SECRET`
-- `TRAKT_REFRESH_TOKEN`
+### First-time authentication
 
-3. Install deps and run locally:
+On first run, you'll need to authenticate with Trakt:
+1. Visit `http://localhost:5000/refresh`
+2. Follow the authentication flow
+3. Your token will be saved to `trakt.json`
 
-```bash
-python -m venv .venv
-. .venv/bin/activate
-pip install requests python-dotenv flask
-python trakt/app.py
+### Update your watch history
+
+Visit `http://localhost:5000/refresh` to fetch the latest data from Trakt.
+
+## Project Structure
+
+```
+trakt-history/
+├── app.py                      # Main Flask application
+├── requirements.txt            # Python dependencies
+├── .env                        # Environment variables (not in git)
+├── .env.example               # Environment template
+├── templates/                 # HTML templates
+├── scripts/                   # Data update scripts
+│   └── update_trakt_local.py
+└── _data/                     # Generated data (not in git)
+    ├── trakt_history.json
+    └── trakt_raw.json
 ```
 
-The app serves at `http://127.0.0.1:5000/`.
+## API Routes
 
-Notes
-- The `/refresh` route runs `scripts/generate_trakt_data.py` and requires the refresh token flow variables.
-- The generator writes `_data/trakt_history.json` which the Flask app reads to show the history.
+- `/` - Main history view
+- `/api/history` - JSON API endpoint
+- `/refresh` - Fetch fresh data from Trakt
+- `/raw` - View raw cached data (debugging)
+
+## Notes
+
+- The `/refresh` route fetches fresh data from Trakt and caches it locally
+- Data is cached for 1 hour by default (configurable via `CACHE_DURATION`)
+- The `_data/` directory contains generated data and is excluded from git
