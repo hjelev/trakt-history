@@ -1,0 +1,330 @@
+#!/usr/bin/env python3
+import os
+import json
+import subprocess
+import importlib.util
+import time
+from datetime import datetime, timedelta
+from flask import Flask, render_template, jsonify, redirect, url_for, flash, request
+from math import ceil
+from dotenv import load_dotenv
+
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+
+APP = Flask(__name__, template_folder='templates')
+APP.secret_key = os.getenv('FLASK_SECRET', 'dev-secret')
+
+DATA_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data', 'trakt_history.json'))
+GEN_SCRIPT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'generate_trakt_data.py'))
+MAIN_PY = os.path.abspath(os.path.join(os.path.dirname(__file__), 'main.py'))
+CACHE_DURATION = int(os.getenv('CACHE_DURATION', 3600))
+
+RAW_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data', 'trakt_raw.json'))
+CACHE_DURATION = int(os.getenv('CACHE_DURATION', 3600))
+
+
+def load_data():
+    if not os.path.exists(DATA_PATH):
+        return {'generated_at': None, 'count': 0, 'items': []}
+    with open(DATA_PATH, 'r') as f:
+        return json.load(f)
+
+
+@APP.route('/')
+def index():
+    data = load_data()
+    # pagination params
+    try:
+        page = max(1, int(request.args.get('page', 1)))
+    except Exception:
+        page = 1
+    try:
+        per_page = int(request.args.get('per_page', 10))
+        if per_page <= 0:
+            per_page = 10
+    except Exception:
+        per_page = 10
+
+    # optional genre filter
+    genre = request.args.get('genre')
+    if genre:
+        genre = genre.strip()
+
+    # optional actor filter
+    actor = request.args.get('actor')
+    if actor:
+        actor = actor.strip()
+
+    # optional search filter
+    search = request.args.get('search')
+    if search:
+        search = search.strip()
+
+    # optional media filter: 'both' (default), 'movies', 'series'
+    media = request.args.get('media', 'both') or 'both'
+    media = media.strip().lower()
+    if media not in ('both', 'movies', 'series'):
+        media = 'both'
+
+    # optional time-period filter: 'all', 'week', 'month', 'year'
+    period = request.args.get('period', 'all') or 'all'
+    period = period.strip().lower()
+    if period not in ('all', 'week', 'month', 'year'):
+        period = 'all'
+
+    # optional release year filter
+    release_year = request.args.get('year', '') or ''
+    release_year = release_year.strip()
+
+    # Filter items by genre when requested (case-insensitive match)
+    items_all = data.get('items', [])
+    if genre:
+        def _match_genre(item):
+            gs = item.get('genres') or []
+            try:
+                return any(g.lower() == genre.lower() for g in gs)
+            except Exception:
+                return False
+        items_all = [it for it in items_all if _match_genre(it)]
+
+    # Filter by actor when requested (case-insensitive match)
+    if actor:
+        def _match_actor(item):
+            cast = item.get('cast') or []
+            try:
+                return any(a.lower() == actor.lower() for a in cast)
+            except Exception:
+                return False
+        items_all = [it for it in items_all if _match_actor(it)]
+
+    # Filter by search query (searches title, actors, and year)
+    if search:
+        def _match_search(item):
+            search_lower = search.lower()
+            # Search in title
+            title = item.get('title', '').lower()
+            if search_lower in title:
+                return True
+            # Search in show title (for episodes)
+            if item.get('type') == 'episode' and item.get('show'):
+                show_title = item.get('show', {}).get('title', '').lower()
+                if search_lower in show_title:
+                    return True
+            # Search in actors
+            cast = item.get('cast') or []
+            for actor_name in cast:
+                if search_lower in actor_name.lower():
+                    return True
+            # Search by year (exact match)
+            year = item.get('year')
+            if year and str(year) == search:
+                return True
+            return False
+        items_all = [it for it in items_all if _match_search(it)]
+
+    # Filter by media type when requested
+    if media == 'movies':
+        items_all = [it for it in items_all if (it.get('type') == 'movie')]
+    elif media == 'series':
+        # 'series' here means episode entries
+        items_all = [it for it in items_all if (it.get('type') == 'episode')]
+
+    # Filter by time period when requested
+    if period != 'all':
+        now = datetime.now()
+        
+        def _parse_watched(item):
+            watched = item.get('watched_at')
+            if not watched:
+                return None
+            try:
+                # Parse YYYY-MM-DD HH:MM format
+                return datetime.strptime(watched, '%Y-%m-%d %H:%M')
+            except Exception:
+                return None
+        
+        if period == 'week':
+            # Current week (Monday to Sunday)
+            start_of_week = now - timedelta(days=now.weekday())
+            start_of_week = start_of_week.replace(hour=0, minute=0, second=0, microsecond=0)
+            items_all = [it for it in items_all if _parse_watched(it) and _parse_watched(it) >= start_of_week]
+        elif period == 'month':
+            # Current month
+            start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            items_all = [it for it in items_all if _parse_watched(it) and _parse_watched(it) >= start_of_month]
+        elif period == 'year':
+            # Current year
+            start_of_year = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            items_all = [it for it in items_all if _parse_watched(it) and _parse_watched(it) >= start_of_year]
+
+    # Filter by release year when requested
+    if release_year:
+        try:
+            year_int = int(release_year)
+            items_all = [it for it in items_all if it.get('year') == year_int]
+        except ValueError:
+            pass  # ignore invalid year input
+
+    total = len(items_all)
+    total_pages = max(1, ceil(total / per_page))
+    if page > total_pages:
+        page = total_pages
+
+    start = (page - 1) * per_page
+    end = start + per_page
+    items = items_all[start:end]
+
+    # Format generated_at to human-readable format
+    def _format_generated_at(s):
+        if not s:
+            return None
+        try:
+            # Handle ISO format with Z or timezone
+            if isinstance(s, str):
+                # Replace Z with +00:00 for Python's fromisoformat
+                s = s.replace('Z', '+00:00')
+                # Handle fractional seconds if present
+                if '.' in s and '+' in s:
+                    # Split on + to separate datetime from timezone
+                    dt_part, tz_part = s.rsplit('+', 1)
+                    # Limit fractional seconds to 6 digits
+                    if '.' in dt_part:
+                        base, frac = dt_part.split('.')
+                        frac = frac[:6]
+                        s = f"{base}.{frac}+{tz_part}"
+                dt = datetime.fromisoformat(s)
+            else:
+                dt = s
+            # Convert to local timezone
+            local_dt = dt.astimezone()
+            return local_dt.strftime('%B %d, %Y at %I:%M %p')
+        except Exception:
+            return s
+
+    paged = {
+        'generated_at': _format_generated_at(data.get('generated_at')),
+        'generation_time': data.get('generation_time'),
+        'count': total,
+        'items': items,
+        'page': page,
+        'per_page': per_page,
+        'total_pages': total_pages,
+        'filter_genre': genre,
+        'filter_actor': actor,
+        'filter_search': search,
+        'filter_media': media,
+        'filter_period': period,
+        'filter_year': release_year,
+    }
+
+    per_page_options = [10, 25, 50, 100]
+    
+    # Get unique years from all items for the year dropdown
+    all_years = set()
+    for it in data.get('items', []):
+        if it.get('year'):
+            all_years.add(it.get('year'))
+    available_years = sorted(all_years, reverse=True)
+    
+    # Calculate statistics from all items (unfiltered)
+    all_items = data.get('items', [])
+    stats = {}
+    
+    # Total watch time (sum of all runtimes)
+    total_runtime = sum(it.get('runtime', 0) or 0 for it in all_items)
+    stats['total_hours'] = round(total_runtime / 60, 1) if total_runtime else 0
+    stats['total_days'] = round(total_runtime / 60 / 24, 1) if total_runtime else 0
+    
+    # Count movies vs episodes
+    stats['total_movies'] = sum(1 for it in all_items if it.get('type') == 'movie')
+    stats['total_episodes'] = sum(1 for it in all_items if it.get('type') == 'episode')
+    
+    # Most watched actor (from cast arrays)
+    from collections import Counter
+    actor_counter = Counter()
+    for it in all_items:
+        cast = it.get('cast', [])
+        if isinstance(cast, list):
+            for actor in cast:
+                if actor:
+                    actor_counter[actor] += 1
+    stats['top_actor'] = actor_counter.most_common(1)[0] if actor_counter else None
+    
+    # Most watched genre
+    genre_counter = Counter()
+    for it in all_items:
+        genres = it.get('genres', [])
+        if isinstance(genres, list):
+            for genre in genres:
+                if genre:
+                    genre_counter[genre] += 1
+    stats['top_genre'] = genre_counter.most_common(1)[0] if genre_counter else None
+    
+    # Year with most watches (release year, not watch year)
+    year_counter = Counter()
+    for it in all_items:
+        year = it.get('year')
+        if year:
+            year_counter[year] += 1
+    stats['top_year'] = year_counter.most_common(1)[0] if year_counter else None
+    
+    # Average rating
+    ratings = [it.get('rating') for it in all_items if it.get('rating') is not None]
+    stats['avg_rating'] = round(sum(ratings) / len(ratings), 1) if ratings else None
+    
+    return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats)
+
+
+@APP.route('/api/history')
+def api_history():
+    data = load_data()
+    return jsonify(data)
+
+
+@APP.route('/raw')
+def raw():
+    """Return the raw cached Trakt response (first item) for debugging."""
+    if not os.path.exists(RAW_PATH):
+        return jsonify({'error': 'raw cache not found', 'path': RAW_PATH}), 404
+    try:
+        with open(RAW_PATH, 'r') as f:
+            raw = json.load(f)
+        # return first item and total count for quick inspection
+        return jsonify({'count': len(raw), 'first': raw[0] if raw else None})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@APP.route('/refresh')
+def refresh():
+    # Prefer running the centralized updater script to ensure consistent
+    # season-resolution and normalization. This keeps resolver logic in one place.
+    updater = os.path.join(os.path.dirname(__file__), 'scripts', 'update_trakt_local.py')
+    if not os.path.exists(updater):
+        flash('Updater script not found: scripts/update_trakt_local.py', 'error')
+        return redirect(url_for('index'))
+
+    # Only run the updater if the generated data is older than CACHE_DURATION
+    try:
+        if os.path.exists(DATA_PATH):
+            mtime = os.path.getmtime(DATA_PATH)
+            age = time.time() - mtime
+            if age < CACHE_DURATION:
+                flash(f'Data is fresh (updated {int(age)}s ago). Skipping refresh.', 'success')
+                return redirect(url_for('index'))
+
+        # Run the updater in the trakt directory
+        proc = subprocess.run(['python3', updater], cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=300)
+        if proc.returncode == 0:
+            flash('Refresh completed successfully (updater)', 'success')
+        else:
+            msg = proc.stderr.strip() or proc.stdout.strip() or f'return code {proc.returncode}'
+            flash(f'Refresh failed: {msg[:1000]}', 'error')
+    except Exception as e:
+        flash(f'Failed to run updater: {e}', 'error')
+
+    return redirect(url_for('index'))
+
+
+if __name__ == '__main__':
+    APP.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=os.getenv('FLASK_DEBUG', '1') == '1')

@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Masoko Trakt History</title>
+    <!-- Bootstrap 5 CSS (no SRI to avoid blocking if hash mismatches) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+      body{font-family:system-ui,Arial;margin:24px}
+      .meta{margin-bottom:12px}
+      .flash-success{color:green}
+      .flash-error{color:red}
+      .imdb-rating{background:#f5c518;color:#000;font-weight:700;padding:0.25rem 0.5rem;border-radius:0.25rem}
+      .poster-thumb{width:100%;height:auto;border-radius:4px;display:block}
+      .cards{display:flex;flex-wrap:wrap;gap:12px}
+      .card-media{flex:0 0 240px;max-width:240px;position:relative}
+      .card {width:240px}
+      .card{transition:transform .18s ease,box-shadow .18s ease}
+      .card:hover,.card:focus-within{transform:translateY(-6px);box-shadow:0 10px 24px rgba(0,0,0,0.18)}
+      .site-logo{width:28px;height:28px;margin-right:8px;display:inline-block}
+      .site-title-link{color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:8px}
+      .card-body{padding:0.6rem}
+      .rating-badge{position:absolute;left:8px;bottom:8px;background:rgba(0,0,0,0.7);color:#fff;padding:0.18rem 0.4rem;border-radius:0.25rem;font-weight:700}
+      .listing-title{font-size:1rem;margin-bottom:0.25rem;line-height:1.1}
+      .listing-title a{color:inherit;text-decoration:none}
+      .listing-title a:hover{text-decoration:underline}
+      .listing-sub{color:#6c757d;font-size:0.85rem}
+      /* clamp title to 2 lines */
+      .clamp-2 {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+      .top-row .meta-controls .form-label.small {margin-bottom:0}
+      .meta-controls .form-select.form-select-sm {height: calc(1.5rem + 0.5rem); padding: .15rem .4rem; font-size: .85rem}
+      .meta-controls select#media_top, .meta-controls select#media {min-width: 110px}
+      .meta-controls select#period_top, .meta-controls select#period {min-width: 120px}
+      @media (max-width:720px) {
+        .top-row {flex-direction:column;align-items:stretch}
+        .meta-controls {margin-top:8px}
+      }
+      /* Dark mode: follow system preference */
+      @media (prefers-color-scheme: dark) {
+        body { background: #07101a; color: #dbeefc }
+        .card { background: #071725; color: #dbeefc; border: 1px solid rgba(255,255,255,0.04) }
+        .card-img-top { background: #0b1620 }
+        .listing-sub { color: #9fb3c6 }
+        .site-title-link { color: #dbeefc }
+        .badge.bg-light { background: #0f2430 !important; color: #dbeefc !important; border: 1px solid rgba(255,255,255,0.03) }
+        a { color: #bfe1ff }
+        .page-link { color: #cfe6ff }
+        .imdb-rating { background: #e6c514; color: #000 }
+        .card:hover,.card:focus-within{transform:translateY(-6px);box-shadow:0 12px 30px rgba(0,0,0,0.6)}
+
+        /* style form selects to match dark theme */
+        .form-select, select, .form-select.form-select-sm { background: #07202a; color: #dbeefc; border: 1px solid rgba(255,255,255,0.06) }
+        .form-select:focus, select:focus { box-shadow: 0 0 0 0.2rem rgba(191,225,255,0.06); outline: none }
+        .form-select option, select option { background: #071725; color: #dbeefc }
+
+        /* style form inputs to match dark theme */
+        .form-control, input[type="search"] { background: #07202a; color: #dbeefc; border: 1px solid rgba(255,255,255,0.06) }
+        .form-control:focus, input[type="search"]:focus { background: #081a22; color: #dbeefc; box-shadow: 0 0 0 0.2rem rgba(191,225,255,0.06); outline: none; border-color: rgba(191,225,255,0.15) }
+        .form-control::placeholder, input[type="search"]::placeholder { color: #6d8592 }
+
+        /* pagination / page links */
+        .pagination .page-link { background: transparent; color: #cfe6ff; border: 1px solid rgba(255,255,255,0.03); }
+        .pagination .page-item .page-link { background: #081a22; color: #cfe6ff }
+        .pagination .page-item.active .page-link { background: #0f495b; color: #fff }
+        
+        /* statistics section dark mode */
+        .meta { background: rgba(255,255,255,0.02) !important; border-color: rgba(255,255,255,0.1) !important; }
+        .page-item.disabled .page-link { color: #6d8592; background: transparent }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h1 class="mb-0">
+        <a href="{{ url_for('index') }}" class="site-title-link" aria-label="Home">
+          <svg class="site-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
+            <circle cx="12" cy="12" r="10" fill="#e03a3a"></circle>
+            <polygon points="10,8 16,12 10,16" fill="#fff"></polygon>
+          </svg>
+          <span class="site-title-text">Masoko Trakt History</span>
+        </a>
+      </h1>
+      <form method="get" class="d-flex" style="max-width: 400px;">
+        <input type="search" name="search" class="form-control" placeholder="Search by title, actor, or year..." value="{{ data.filter_search or '' }}" aria-label="Search">
+        <input type="hidden" name="per_page" value="{{ data.per_page }}">
+        <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
+        <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
+        <input type="hidden" name="media" value="{{ data.filter_media or 'both' }}">
+        <input type="hidden" name="period" value="{{ data.filter_period or 'all' }}">
+        <input type="hidden" name="year" value="{{ data.filter_year or '' }}">
+        <button type="submit" class="btn btn-primary ms-2">Search</button>
+      </form>
+    </div>
+    <!-- generated meta moved to bottom of page -->
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <ul>
+        {% for category, message in messages %}
+          <li class="flash-{{ category }}">{{ message }}</li>
+        {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+
+    <div class="top-row d-flex align-items-center mb-2" style="gap:12px">
+      <nav aria-label="Page navigation">
+        <ul class="pagination pagination-sm mb-0">
+          {% if data.page > 1 %}
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page-1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Previous">◀</a></li>
+          {% endif %}
+          <li class="page-item disabled"><span class="page-link">Page {{ data.page }} / {{ data.total_pages }}</span></li>
+          {% if data.page < data.total_pages %}
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page+1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Next">▶</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+
+      <div class="meta-controls d-flex align-items-center" style="gap:8px">
+        {% if data.filter_search %}
+          <span class="small">Search: <strong>{{ data.filter_search }}</strong></span>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;|&nbsp;
+        {% endif %}
+        {% if data.filter_genre %}
+          <span class="small">Filtered by genre: <strong>{{ data.filter_genre }}</strong></span>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;|&nbsp;
+        {% endif %}
+        {% if data.filter_actor %}
+          <span class="small">Filtered by actor: <strong>{{ data.filter_actor }}</strong></span>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;|&nbsp;
+        {% endif %}
+        <form class="d-inline d-flex align-items-center" method="get" style="gap:6px">
+          <label for="per_page_top" class="form-label small mb-0 me-1">Show:</label>
+          <select id="per_page_top" name="per_page" class="form-select form-select-sm me-2" onchange="this.form.submit()">
+            {% for opt in per_page_options %}
+              <option value="{{ opt }}" {% if data.per_page == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+          <label for="media_top" class="form-label small mb-0 me-1">Type:</label>
+          <select id="media_top" name="media" class="form-select form-select-sm me-2" onchange="this.form.submit()">
+            <option value="both" {% if data.filter_media == 'both' %}selected{% endif %}>🎬📺 Both</option>
+            <option value="movies" {% if data.filter_media == 'movies' %}selected{% endif %}>🎬 Movies</option>
+            <option value="series" {% if data.filter_media == 'series' %}selected{% endif %}>📺 Series</option>
+          </select>
+          <label for="period_top" class="form-label small mb-0 me-1">When:</label>
+          <select id="period_top" name="period" class="form-select form-select-sm me-2" onchange="this.form.submit()">
+            <option value="all" {% if data.filter_period == 'all' %}selected{% endif %}>📅 All time</option>
+            <option value="week" {% if data.filter_period == 'week' %}selected{% endif %}>📅 This week</option>
+            <option value="month" {% if data.filter_period == 'month' %}selected{% endif %}>📅 This month</option>
+            <option value="year" {% if data.filter_period == 'year' %}selected{% endif %}>📅 This year</option>
+          </select>
+          <label for="year_top" class="form-label small mb-0 me-1">Year:</label>
+          <select id="year_top" name="year" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width: 100px;">
+            <option value="">🗓️ All</option>
+            {% for yr in available_years %}
+              <option value="{{ yr }}" {% if data.filter_year and data.filter_year|string == yr|string %}selected{% endif %}>{{ yr }}</option>
+            {% endfor %}
+          </select>
+          <input type="hidden" name="page" value="1">
+          <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
+          <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
+          <input type="hidden" name="search" value="{{ data.filter_search or '' }}">
+        </form>
+      </div>
+    </div>
+
+    <div class="cards">
+      {% for it in data['items'] %}
+        {% set imdb_url = None %}
+        {% if it.ids and it.ids.imdb %}
+          {% set imdb_url = 'https://www.imdb.com/title/' ~ it.ids.imdb ~ '/' %}
+        {% endif %}
+
+        <div class="card" aria-label="media-card">
+          <div class="card-media">
+            {% if imdb_url %}
+              <a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer" class="poster-link">
+                {% if it.thumbnail %}
+                  <img src="{{ it.thumbnail }}" class="card-img-top" alt="poster">
+                {% else %}
+                  <div style="width:100%;height:320px;background:#eee;border-radius:4px"></div>
+                {% endif %}
+              </a>
+            {% else %}
+              {% if it.thumbnail %}
+                <img src="{{ it.thumbnail }}" class="card-img-top" alt="poster">
+              {% else %}
+                <div style="width:100%;height:320px;background:#eee;border-radius:4px"></div>
+              {% endif %}
+            {% endif %}
+
+            {% if it.type == 'episode' and it.rating is not none %}
+              <span class="rating-badge">{{ it.rating }}</span>
+            {% elif it.type == 'episode' %}
+              <span class="rating-badge">n/a</span>
+            {% endif %}
+          </div>
+
+          <div class="card-body">
+            {% if it.type == 'episode' and it.show and it.show.title %}
+              {# Show the series title + year + SxEx on the first line, then episode title on the next line #}
+              {% if imdb_url %}
+                <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</a></h6>
+              {% else %}
+                <h6 class="listing-title clamp-2">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</h6>
+              {% endif %}
+              {% if it.cast %}
+                <div class="small mb-1">
+                  {% for a in it.cast %}
+                    <a href="{{ url_for('index', actor=a, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
+                  {% endfor %}
+                </div>
+              {% endif %}
+              <div class="small mt-1 clamp-2">{{ it.title }}</div>
+            {% else %}
+              {% if imdb_url %}
+                <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</a></h6>
+              {% else %}
+                <h6 class="listing-title clamp-2">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</h6>
+              {% endif %}
+              {% if it.cast %}
+                <div class="small mb-2">
+                  {% for a in it.cast %}
+                    <a href="{{ url_for('index', actor=a, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            {% endif %}
+
+            <div class="listing-sub small">
+              <div>Watched: {{ it.watched_at or 'N/A' }}</div>
+              {% if it.runtime %}
+                <div>Duration: {{ it.runtime }} min</div>
+              {% endif %}
+              {% if it.genres %}
+                <div>Genres:
+                  {% for g in it.genres %}
+                    <a href="{{ url_for('index', genre=g, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, actor=data.filter_actor, search=data.filter_search) }}" class="badge bg-light text-dark text-decoration-none">{{ g }}</a>
+                  {% endfor %}
+                </div>
+              {% endif %}
+            </div>
+
+            <!-- rating overlay is shown on the poster; no inline yellow rating here -->
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+    <div class="bottom-row d-flex align-items-center mt-3" style="gap:12px">
+      <nav aria-label="Page navigation">
+        <ul class="pagination pagination-sm mb-0">
+          {% if data.page > 1 %}
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page-1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Previous">◀</a></li>
+          {% endif %}
+          <li class="page-item disabled"><span class="page-link">Page {{ data.page }} / {{ data.total_pages }}</span></li>
+          {% if data.page < data.total_pages %}
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page+1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Next">▶</a></li>
+          {% endif %}
+        </ul>
+      </nav>
+
+      <div class="meta-controls d-flex align-items-center" style="gap:8px">
+        {% if data.filter_search %}
+          <span class="small">Search: <strong>{{ data.filter_search }}</strong></span>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;|&nbsp;
+        {% endif %}
+        {% if data.filter_genre %}
+          <span class="small">Filtered by genre: <strong>{{ data.filter_genre }}</strong></span>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;|&nbsp;
+        {% endif %}
+        {% if data.filter_actor %}
+          <span class="small">Filtered by actor: <strong>{{ data.filter_actor }}</strong></span>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;|&nbsp;
+        {% endif %}
+        <form class="d-inline d-flex align-items-center" method="get" style="gap:6px">
+          <label for="per_page" class="form-label small mb-0">Show:</label>
+          <select id="per_page" name="per_page" class="form-select form-select-sm" onchange="this.form.submit()">
+            {% for opt in per_page_options %}
+              <option value="{{ opt }}" {% if data.per_page == opt %}selected{% endif %}>{{ opt }}</option>
+            {% endfor %}
+          </select>
+          <label for="media" class="form-label small mb-0">Type:</label>
+          <select id="media" name="media" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="both" {% if data.filter_media == 'both' %}selected{% endif %}>🎬📺 Both</option>
+            <option value="movies" {% if data.filter_media == 'movies' %}selected{% endif %}>🎬 Movies</option>
+            <option value="series" {% if data.filter_media == 'series' %}selected{% endif %}>📺 Series</option>
+          </select>
+          <label for="period" class="form-label small mb-0 ms-2">When:</label>
+          <select id="period" name="period" class="form-select form-select-sm" onchange="this.form.submit()">
+            <option value="all" {% if data.filter_period == 'all' %}selected{% endif %}>📅 All time</option>
+            <option value="week" {% if data.filter_period == 'week' %}selected{% endif %}>📅 This week</option>
+            <option value="month" {% if data.filter_period == 'month' %}selected{% endif %}>📅 This month</option>
+            <option value="year" {% if data.filter_period == 'year' %}selected{% endif %}>📅 This year</option>
+          </select>
+          <label for="year" class="form-label small mb-0 ms-2">Year:</label>
+          <select id="year" name="year" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width: 100px;">
+            <option value="">🗓️ All</option>
+            {% for yr in available_years %}
+              <option value="{{ yr }}" {% if data.filter_year and data.filter_year|string == yr|string %}selected{% endif %}>{{ yr }}</option>
+            {% endfor %}
+          </select>
+          <input type="hidden" name="page" value="1">
+          <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
+          <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
+          <input type="hidden" name="search" value="{{ data.filter_search or '' }}">
+        </form>
+      </div>
+    </div>
+
+    {% if stats %}
+    <div class="meta mt-3 p-3" style="background: rgba(0,0,0,0.02); border-radius: 8px; border: 1px solid rgba(0,0,0,0.1);">
+      <h6 class="mb-3"><strong>📊 Statistics</strong></h6>
+      <div class="row g-2 small">
+        <div class="col-md-3">
+          <strong>⏱️ Total Watch Time:</strong> {{ stats.total_hours }}h ({{ stats.total_days }} days)
+        </div>
+        <div class="col-md-3">
+          <strong>🎬 Movies:</strong> {{ stats.total_movies }} &nbsp;|&nbsp; <strong>📺 Episodes:</strong> {{ stats.total_episodes }}
+        </div>
+        {% if stats.top_actor %}
+        <div class="col-md-3">
+          <strong>⭐ Top Actor:</strong> {{ stats.top_actor[0] }} ({{ stats.top_actor[1] }}x)
+        </div>
+        {% endif %}
+        {% if stats.top_genre %}
+        <div class="col-md-3">
+          <strong>🎭 Top Genre:</strong> {{ stats.top_genre[0] }} ({{ stats.top_genre[1] }}x)
+        </div>
+        {% endif %}
+      </div>
+      <div class="row g-2 small mt-1">
+        {% if stats.top_year %}
+        <div class="col-md-3">
+          <strong>📅 Top Release Year:</strong> {{ stats.top_year[0] }} ({{ stats.top_year[1] }} items)
+        </div>
+        {% endif %}
+        {% if stats.avg_rating %}
+        <div class="col-md-3">
+          <strong>⭐ Average Rating:</strong> {{ stats.avg_rating }}/10
+        </div>
+        {% endif %}
+      </div>
+      <hr class="my-2" style="opacity: 0.05;">
+      <div class="row g-2 small">
+        <div class="col-md-3">
+          <strong>🕐 Generated:</strong> {{ data.generated_at or 'N/A' }}
+        </div>
+        <div class="col-md-3">
+          <strong>⚡ Generation Time:</strong> {% if data.generation_time %}{{ data.generation_time }}s{% else %}N/A{% endif %}
+        </div>
+        <div class="col-md-3">
+          <strong>📊 Total Items:</strong> {{ data.count }}
+        </div>
+        <div class="col-md-3">
+          <a href="/refresh" class="text-decoration-none">🔄 Refresh now</a>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+  </body>
+</html>
