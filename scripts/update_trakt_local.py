@@ -147,13 +147,147 @@ def main():
     if history_objs is None:
         raise SystemExit('Trakt API returned None - check authentication token or API status')
     
+    # Fetch user ratings (one API call for all ratings)
+    print("\n=== Fetching user ratings ===")
+    user_ratings = {}
+    try:
+        ratings_objs = trakt_main.Trakt['sync/ratings'].get()
+        if ratings_objs:
+            for rating_item in ratings_objs:
+                item_type = None
+                trakt_id = None
+                rating_value = None
+                
+                # Determine type and extract ID based on the object type
+                obj_type_name = type(rating_item).__name__
+                
+                if obj_type_name == 'Movie':
+                    item_type = 'movie'
+                    # Try to get trakt ID using get_key method first
+                    if hasattr(rating_item, 'get_key'):
+                        try:
+                            trakt_id = rating_item.get_key('trakt')
+                        except:
+                            pass
+                    
+                    # Fallback to pk or id
+                    if not trakt_id:
+                        if hasattr(rating_item, 'pk'):
+                            pk_val = rating_item.pk
+                            # pk might be a tuple like ('trakt', 123) or ('imdb', 'tt123')
+                            if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
+                                trakt_id = pk_val[1]
+                        elif hasattr(rating_item, 'id'):
+                            trakt_id = rating_item.id
+                elif obj_type_name == 'Show':
+                    item_type = 'show'
+                    if hasattr(rating_item, 'get_key'):
+                        try:
+                            trakt_id = rating_item.get_key('trakt')
+                        except:
+                            pass
+                    if not trakt_id and hasattr(rating_item, 'pk'):
+                        pk_val = rating_item.pk
+                        if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
+                            trakt_id = pk_val[1]
+                    if not trakt_id and hasattr(rating_item, 'id'):
+                        trakt_id = rating_item.id
+                elif obj_type_name == 'Episode':
+                    item_type = 'episode'
+                    if hasattr(rating_item, 'get_key'):
+                        try:
+                            trakt_id = rating_item.get_key('trakt')
+                        except:
+                            pass
+                    if not trakt_id and hasattr(rating_item, 'pk'):
+                        pk_val = rating_item.pk
+                        if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
+                            trakt_id = pk_val[1]
+                    if not trakt_id and hasattr(rating_item, 'id'):
+                        trakt_id = rating_item.id
+                elif obj_type_name == 'Season':
+                    # For seasons, try to get the show ID
+                    item_type = 'show'
+                    if hasattr(rating_item, 'show') and rating_item.show:
+                        if hasattr(rating_item.show, 'get_key'):
+                            try:
+                                trakt_id = rating_item.show.get_key('trakt')
+                            except:
+                                pass
+                        if not trakt_id and hasattr(rating_item.show, 'pk'):
+                            pk_val = rating_item.show.pk
+                            if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
+                                trakt_id = pk_val[1]
+                        if not trakt_id and hasattr(rating_item.show, 'id'):
+                            trakt_id = rating_item.show.id
+                
+                # Extract rating value
+                if hasattr(rating_item, 'rating'):
+                    rating_value = rating_item.rating
+                    # Convert Rating object to int - parse from string representation
+                    rating_str = str(rating_value)
+                    if '/' in rating_str:
+                        # Parse "8/10" or "<Rating 8/10 ...>" format
+                        try:
+                            # Extract the number before the /
+                            before_slash = rating_str.split('/')[0]
+                            # Get the last "word" (number) before the slash
+                            rating_value = int(before_slash.split()[-1])
+                        except (ValueError, IndexError):
+                            rating_value = None
+                    else:
+                        # Try direct conversion
+                        try:
+                            rating_value = int(rating_value)
+                        except (ValueError, TypeError):
+                            rating_value = None
+                
+                if item_type and trakt_id and rating_value:
+                    user_ratings[(item_type, trakt_id)] = int(rating_value)
+            
+            print(f"  Loaded {len(user_ratings)} user ratings")
+    except Exception as e:
+        print(f"  Warning: Could not fetch user ratings: {e}")
+        import traceback
+        traceback.print_exc()
+    
     history = []
     seen = 0
-    print(f"Processing history items...")
+    print(f"\nProcessing history items...")
     for item in history_objs:
         d = item.to_dict()
         d['force_type'] = 'movie' if type(item).__name__ == 'Movie' else 'episode'
         d['watched_at_iso'] = item.watched_at.isoformat() if getattr(item, 'watched_at', None) else None
+        
+        # Add user rating if available
+        trakt_id = None
+        if d['force_type'] == 'movie':
+            # For movies, the item itself IS the movie
+            if hasattr(item, 'get_key'):
+                try:
+                    trakt_id = item.get_key('trakt')
+                except:
+                    pass
+            if trakt_id and ('movie', trakt_id) in user_ratings:
+                d['user_rating'] = user_ratings[('movie', trakt_id)]
+        elif d['force_type'] == 'episode':
+            # For episodes, try episode-level rating first
+            if hasattr(item, 'episode') and item.episode and hasattr(item.episode, 'get_key'):
+                try:
+                    trakt_id = item.episode.get_key('trakt')
+                except:
+                    pass
+            if trakt_id and ('episode', trakt_id) in user_ratings:
+                d['user_rating'] = user_ratings[('episode', trakt_id)]
+            # Also check for show-level rating as fallback
+            if 'user_rating' not in d and hasattr(item, 'show') and item.show and hasattr(item.show, 'get_key'):
+                try:
+                    show_trakt_id = item.show.get_key('trakt')
+                    if show_trakt_id and ('show', show_trakt_id) in user_ratings:
+                        d['user_rating'] = user_ratings[('show', show_trakt_id)]
+                except:
+                    pass
+        
         if d['force_type'] == 'episode':
             d['extracted_show_title'] = item.show.title if hasattr(item, 'show') and item.show else None
             if hasattr(item, 'episode') and item.episode:
@@ -331,26 +465,18 @@ def main():
                 'year': m.get('year') or item.get('year'),
                 'ids': m.get('ids') or item.get('ids'),
                 'runtime': m.get('runtime') or item.get('runtime'),
-                'rating': m.get('rating') or item.get('rating'),
+                'rating': item.get('user_rating'),  # Use only user rating
                 'genres': m.get('genres') or item.get('genres'),
                 'cast': item.get('cast', []),
             })
             # include thumbnail if available
             if item.get('thumbnail'):
                 out['thumbnail'] = item.get('thumbnail')
-            # round rating to one decimal when numeric
-            if out.get('rating') is not None:
-                try:
-                    out['rating'] = round(float(out['rating']), 1)
-                except Exception:
-                    pass
         else:
             ep = item.get('episode') or item
             season = item.get('extracted_season') if item.get('extracted_season') is not None else (ep.get('season') if isinstance(ep, dict) else None) or item.get('season')
             season = season if season is not None else 1
             number = (ep.get('number') if isinstance(ep, dict) and ep.get('number') is not None else item.get('number'))
-            # Use show rating (cached from show details) instead of individual episode rating
-            rating = item.get('show_rating') or ep.get('rating') or item.get('rating')
             out.update({
                 'type': 'episode',
                 'title': ep.get('title') or item.get('title'),
@@ -358,7 +484,7 @@ def main():
                 'number': number,
                 'ids': ep.get('ids') or item.get('ids'),
                 'runtime': ep.get('runtime') or item.get('runtime'),
-                'rating': rating,
+                'rating': item.get('user_rating'),  # Use only user rating
                 'show': {'title': (item.get('show') or {}).get('title') or item.get('extracted_show_title')},
                 'genres': (item.get('show') or {}).get('genres') or item.get('genres'),
                 'year': (item.get('show') or {}).get('year') or item.get('year'),
@@ -367,12 +493,6 @@ def main():
             # include thumbnail if available
             if item.get('thumbnail'):
                 out['thumbnail'] = item.get('thumbnail')
-            # round rating to one decimal when numeric
-            if out.get('rating') is not None:
-                try:
-                    out['rating'] = round(float(out['rating']), 1)
-                except Exception:
-                    pass
         return out
 
     # Load local .env to get TRAKT_CLIENT_ID for search fallback
@@ -568,7 +688,6 @@ def main():
     # Use RPDB for both (no API calls, instant) - some show posters may be placeholders but it's fast
     show_poster_cache = {}  # Cache posters by show trakt_id
     show_ids_cache = {}  # Cache show IDs by show title
-    show_rating_cache = {}  # Cache ratings by show trakt_id
     
     print(f"\n=== Building image URLs ({'disabled' if args.no_images else 'RPDB'}) ===")
     
@@ -685,63 +804,6 @@ def main():
     
     print(f"  Cached {len(show_poster_cache)} unique show posters")
 
-    # Fetch show ratings for episodes (lightweight - just ratings, no full enrichment)
-    # This runs even with --no-enrichment to optimize rating data
-    print("\n=== Fetching show ratings for episodes ===")
-    show_title_to_id_ratings = {}
-    for it in history:
-        if it.get('force_type') == 'episode':
-            show = it.get('show') or {}
-            show_title = show.get('title') if isinstance(show, dict) else None
-            if not show_title:
-                show_title = it.get('extracted_show_title')
-            
-            if show_title and show_title not in show_title_to_id_ratings:
-                show_ids = show.get('ids') if isinstance(show, dict) else None
-                if show_ids and isinstance(show_ids, dict):
-                    show_trakt_id = show_ids.get('trakt')
-                    if show_trakt_id:
-                        show_title_to_id_ratings[show_title] = show_trakt_id
-    
-    # Fetch just the rating for each show (minimal API call)
-    for show_title, show_trakt_id in show_title_to_id_ratings.items():
-        if show_trakt_id not in show_rating_cache:
-            try:
-                # Fetch show with minimal extended parameter - just need rating
-                show_obj = trakt_main.Trakt[f'shows/{show_trakt_id}'].get()
-                rating = None
-                if hasattr(show_obj, 'rating'):
-                    rating = show_obj.rating
-                elif hasattr(show_obj, 'get'):
-                    rating = show_obj.get('rating')
-                elif hasattr(show_obj, '__dict__'):
-                    rating = vars(show_obj).get('rating')
-                
-                if rating is not None:
-                    # Convert to float to ensure JSON serialization works
-                    try:
-                        rating = float(rating)
-                        show_rating_cache[show_trakt_id] = rating
-                    except (ValueError, TypeError):
-                        pass
-            except Exception:
-                pass
-    
-    # Apply cached show ratings to episodes
-    for it in history:
-        if it.get('force_type') == 'episode':
-            show = it.get('show') or {}
-            show_title = show.get('title') if isinstance(show, dict) else None
-            if not show_title:
-                show_title = it.get('extracted_show_title')
-            
-            if show_title:
-                show_trakt_id = show_title_to_id_ratings.get(show_title)
-                if show_trakt_id and show_trakt_id in show_rating_cache:
-                    it['show_rating'] = show_rating_cache[show_trakt_id]
-    
-    print(f"  Cached {len(show_rating_cache)} show ratings (will be reused for all episodes)")
-
     # Enrich episodes with show details (genres and year)
     # Build a show title to trakt_id mapping for episodes
     if not getattr(args, 'no_enrichment', False):
@@ -790,12 +852,6 @@ def main():
                     else:
                         sd = dict(show_obj) if show_obj else {}
                     show_details[show_trakt_id] = sd
-                    # Cache show rating for use in episodes (convert to float for JSON)
-                    if sd and sd.get('rating') is not None:
-                        try:
-                            show_rating_cache[show_trakt_id] = float(sd.get('rating'))
-                        except (ValueError, TypeError):
-                            pass
                 except Exception:
                     show_details[show_trakt_id] = None
         
@@ -819,14 +875,6 @@ def main():
                         # Add year from show details
                         if sd.get('year') and not it.get('year'):
                             it['year'] = sd.get('year')
-                        # Cache show rating from full enrichment if available and not already cached
-                        if sd.get('rating') is not None and show_trakt_id not in show_rating_cache:
-                            try:
-                                rating_val = float(sd.get('rating'))
-                                show_rating_cache[show_trakt_id] = rating_val
-                                it['show_rating'] = rating_val
-                            except (ValueError, TypeError):
-                                pass
                         # Update show object with genres and year for normalization
                         if not isinstance(it.get('show'), dict):
                             it['show'] = {}
