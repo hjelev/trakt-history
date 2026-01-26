@@ -34,20 +34,25 @@ def authenticate():
         secret=CLIENT_SECRET
     )
     
-    # Start authentication flow
+    # Start device authentication flow
     print("\nStarting authentication flow...")
-    auth = Trakt['oauth'].token_exchange(None, 'urn:ietf:wg:oauth:2.0:oob')
-    
-    if not auth:
-        print("✗ Authentication failed")
+    try:
+        code = Trakt['oauth/device'].code()
+    except Exception as e:
+        print(f"✗ Failed to get device code: {e}")
         return False
     
-    print(f"\n1. Visit this URL in your browser:\n   {auth['verification_url']}")
-    print(f"\n2. Enter this code: {auth['user_code']}")
-    print(f"\n3. Waiting for authorization (expires in {auth['expires_in']} seconds)...")
+    print(f"\n1. Visit this URL in your browser:\n   {code.get('verification_url')}")
+    print(f"\n2. Enter this code: {code.get('user_code')}")
+    print(f"\n3. Waiting for authorization (expires in {code.get('expires_in')} seconds)...")
+    print("   Press Ctrl+C to cancel\n")
     
     # Poll for authorization
-    token = Trakt['oauth'].token_poll(**auth)
+    try:
+        token = Trakt['oauth/device'].poll(**code)
+    except Exception as e:
+        print(f"\n✗ Polling failed: {e}")
+        return False
     
     if not token:
         print("\n✗ Authentication timed out or was denied")
