@@ -129,6 +129,7 @@
         <input type="hidden" name="media" value="{{ data.filter_media or 'both' }}">
         <input type="hidden" name="period" value="{{ data.filter_period or 'all' }}">
         <input type="hidden" name="year" value="{{ data.filter_year or '' }}">
+        <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
         <button type="submit" class="btn btn-primary ms-2">Search</button>
       </form>
     </div>
@@ -148,11 +149,11 @@
       <nav aria-label="Page navigation">
         <ul class="pagination pagination-sm mb-0">
           {% if data.page > 1 %}
-            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page-1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Previous">◀</a></li>
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page-1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" title="Previous">◀</a></li>
           {% endif %}
           <li class="page-item disabled"><span class="page-link">Page {{ data.page }} / {{ data.total_pages }}</span></li>
           {% if data.page < data.total_pages %}
-            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page+1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Next">▶</a></li>
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page+1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" title="Next">▶</a></li>
           {% endif %}
         </ul>
       </nav>
@@ -160,17 +161,17 @@
       <div class="meta-controls d-flex align-items-center" style="gap:8px">
         {% if data.filter_search %}
           <span class="small">Search: <strong>{{ data.filter_search }}</strong></span>
-          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="small">(clear)</a>
           &nbsp;|&nbsp;
         {% endif %}
         {% if data.filter_genre %}
           <span class="small">Filtered by genre: <strong>{{ data.filter_genre }}</strong></span>
-          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="small">(clear)</a>
           &nbsp;|&nbsp;
         {% endif %}
         {% if data.filter_actor %}
           <span class="small">Filtered by actor: <strong>{{ data.filter_actor }}</strong></span>
-          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="small">(clear)</a>
           &nbsp;|&nbsp;
         {% endif %}
         <form class="d-inline d-flex align-items-center" method="get" style="gap:6px">
@@ -200,10 +201,16 @@
               <option value="{{ yr }}" {% if data.filter_year and data.filter_year|string == yr|string %}selected{% endif %}>{{ yr }}</option>
             {% endfor %}
           </select>
+          <label for="rated_top" class="form-label small mb-0 me-1">Rated:</label>
+          <select id="rated_top" name="rated" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width: 90px;">
+            <option value="">⭐ All</option>
+            <option value="yes" {% if data.filter_rated == 'yes' %}selected{% endif %}>⭐ Rated only</option>
+          </select>
           <input type="hidden" name="page" value="1">
           <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
           <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
           <input type="hidden" name="search" value="{{ data.filter_search or '' }}">
+          <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
         </form>
       </div>
     </div>
@@ -249,7 +256,7 @@
               {% if it.cast %}
                 <div class="small mb-1">
                   {% for a in it.cast %}
-                    <a href="{{ url_for('index', actor=a, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
+                    <a href="{{ url_for('index', actor=a, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
                   {% endfor %}
                 </div>
               {% endif %}
@@ -263,7 +270,7 @@
               {% if it.cast %}
                 <div class="small mb-2">
                   {% for a in it.cast %}
-                    <a href="{{ url_for('index', actor=a, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
+                    <a href="{{ url_for('index', actor=a, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
                   {% endfor %}
                 </div>
               {% endif %}
@@ -277,7 +284,7 @@
               {% if it.genres %}
                 <div>Genres:
                   {% for g in it.genres %}
-                    <a href="{{ url_for('index', genre=g, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, actor=data.filter_actor, search=data.filter_search) }}" class="badge bg-light text-dark text-decoration-none">{{ g }}</a>
+                    <a href="{{ url_for('index', genre=g, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, actor=data.filter_actor, search=data.filter_search, rated=data.filter_rated) }}" class="badge bg-light text-dark text-decoration-none">{{ g }}</a>
                   {% endfor %}
                 </div>
               {% endif %}
@@ -292,11 +299,11 @@
       <nav aria-label="Page navigation">
         <ul class="pagination pagination-sm mb-0">
           {% if data.page > 1 %}
-            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page-1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Previous">◀</a></li>
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page-1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" title="Previous">◀</a></li>
           {% endif %}
           <li class="page-item disabled"><span class="page-link">Page {{ data.page }} / {{ data.total_pages }}</span></li>
           {% if data.page < data.total_pages %}
-            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page+1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" title="Next">▶</a></li>
+            <li class="page-item"><a class="page-link" href="{{ url_for('index', page=data.page+1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" title="Next">▶</a></li>
           {% endif %}
         </ul>
       </nav>
@@ -304,18 +311,18 @@
       <div class="meta-controls d-flex align-items-center" style="gap:8px">
         {% if data.filter_search %}
           <span class="small">Search: <strong>{{ data.filter_search }}</strong></span>
-          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="small">(clear)</a>
           &nbsp;|&nbsp;
         {% endif %}
         {% if data.filter_genre %}
           <span class="small">Filtered by genre: <strong>{{ data.filter_genre }}</strong></span>
-          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="small">(clear)</a>
           &nbsp;|&nbsp;
         {% endif %}
         {% if data.filter_actor %}
           <span class="small">Filtered by actor: <strong>{{ data.filter_actor }}</strong></span>
-          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
-          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, media=data.filter_media, period=data.filter_period, year=data.filter_year) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="small">(clear)</a>
+          &nbsp;<a href="{{ url_for('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="small">(clear)</a>
           &nbsp;|&nbsp;
         {% endif %}
         <form class="d-inline d-flex align-items-center" method="get" style="gap:6px">
@@ -345,10 +352,16 @@
               <option value="{{ yr }}" {% if data.filter_year and data.filter_year|string == yr|string %}selected{% endif %}>{{ yr }}</option>
             {% endfor %}
           </select>
+          <label for="rated" class="form-label small mb-0 ms-2">Rated:</label>
+          <select id="rated" name="rated" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width: 90px;">
+            <option value="">⭐ All</option>
+            <option value="yes" {% if data.filter_rated == 'yes' %}selected{% endif %}>⭐ Rated only</option>
+          </select>
           <input type="hidden" name="page" value="1">
           <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
           <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
           <input type="hidden" name="search" value="{{ data.filter_search or '' }}">
+          <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
         </form>
       </div>
     </div>

@@ -76,6 +76,12 @@ def index():
     release_year = request.args.get('year', '') or ''
     release_year = release_year.strip()
 
+    # optional rated only filter
+    rated_only = request.args.get('rated', '') or ''
+    rated_only = rated_only.strip().lower()
+    if rated_only not in ('yes', 'no', ''):
+        rated_only = ''
+
     # Filter items by genre when requested (case-insensitive match)
     items_all = data.get('items', [])
     if genre:
@@ -165,6 +171,10 @@ def index():
         except ValueError:
             pass  # ignore invalid year input
 
+    # Filter by rated only when requested
+    if rated_only == 'yes':
+        items_all = [it for it in items_all if it.get('rating') is not None]
+
     total = len(items_all)
     total_pages = max(1, ceil(total / per_page))
     if page > total_pages:
@@ -215,6 +225,7 @@ def index():
         'filter_media': media,
         'filter_period': period,
         'filter_year': release_year,
+        'filter_rated': rated_only,
     }
 
     per_page_options = [10, 25, 50, 100]
