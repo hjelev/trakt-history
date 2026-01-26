@@ -1,0 +1,20 @@
+[Unit]
+Description=Trakt Watch History Web App
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/git/trakt-history
+Environment="PATH=/home/pi/git/trakt-history/.venv/bin"
+ExecStart=/home/pi/git/trakt-history/.venv/bin/python /home/pi/git/trakt-history/app.py
+Restart=always
+RestartSec=10
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trakt-app
+
+[Install]
+WantedBy=multi-user.target

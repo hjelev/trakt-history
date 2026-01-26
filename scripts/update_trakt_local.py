@@ -3,7 +3,7 @@ import os
 import json
 import importlib.util
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 import urllib.parse
 import requests
 import argparse
@@ -97,7 +97,8 @@ def main():
                 
                 if timestamps:
                     latest = max(timestamps)
-                    start_at = latest
+                    # Add 1 second to avoid re-fetching the last item (Trakt's start_at is inclusive)
+                    start_at = latest + timedelta(seconds=1)
                     print(f"Found {len(cached_items)} cached items, latest watched: {latest.isoformat()}")
                     print("Fetching only new items since last update (incremental mode)...")
         except Exception as e:
@@ -225,17 +226,66 @@ def main():
 
     print(f"After deduplication: {len(deduped)} items (removed {len(history) - len(deduped)} duplicates)")
 
-    # Check if we actually got any new items
+    # Exit early if no new items - cache is already up to date
     if start_at and len(deduped) == len(cached_items):
         print('\nNo new items found since last update.')
-        print('Use --force to reprocess all items anyway.')
+        print('Cache is already up to date. Use --force to reprocess anyway.')
         return
 
     os.makedirs(os.path.dirname(RAW_PATH), exist_ok=True)
 
-    print("\n=== Processing items (normalization and image fetching) ===")
-    # replace history with deduped list for further processing
-    history = deduped
+    # Smart incremental processing: identify which items are new vs cached
+    new_items = []
+    cached_item_keys = set()
+    
+    if cached_items and not args.force:
+        # Build a set of keys from cached items
+        for cached_item in cached_items:
+            trakt_id = None
+            try:
+                trakt_id = (cached_item.get('ids') or {}).get('trakt')
+            except Exception:
+                pass
+            key_id = str(trakt_id) if trakt_id is not None else (cached_item.get('title') or '')
+            watched_raw = cached_item.get('watched_at_iso') or cached_item.get('watched_at')
+            watched_day = None
+            if watched_raw:
+                try:
+                    watched_day = str(watched_raw)[:10]
+                except Exception:
+                    pass
+            key = (cached_item.get('force_type'), key_id, watched_day)
+            cached_item_keys.add(key)
+        
+        # Identify new items
+        for it in deduped:
+            trakt_id = None
+            try:
+                trakt_id = (it.get('ids') or {}).get('trakt')
+            except Exception:
+                pass
+            key_id = str(trakt_id) if trakt_id is not None else (it.get('title') or '')
+            watched_raw = it.get('watched_at_iso') or it.get('watched_at')
+            watched_day = None
+            if watched_raw:
+                try:
+                    watched_day = str(watched_raw)[:10]
+                except Exception:
+                    pass
+            key = (it.get('force_type'), key_id, watched_day)
+            
+            if key not in cached_item_keys:
+                new_items.append(it)
+        
+        print(f"Identified {len(new_items)} new items to process (will reuse {len(cached_items)} from cache)")
+    else:
+        # No cache or force flag - process everything
+        new_items = deduped
+        print(f"Processing all {len(new_items)} items")
+
+    # Only process new items
+    print("\n=== Processing new items (normalization and image fetching) ===")
+    history = new_items
 
     # normalize
     def normalize(item):
@@ -299,6 +349,8 @@ def main():
             season = item.get('extracted_season') if item.get('extracted_season') is not None else (ep.get('season') if isinstance(ep, dict) else None) or item.get('season')
             season = season if season is not None else 1
             number = (ep.get('number') if isinstance(ep, dict) and ep.get('number') is not None else item.get('number'))
+            # Use show rating (cached from show details) instead of individual episode rating
+            rating = item.get('show_rating') or ep.get('rating') or item.get('rating')
             out.update({
                 'type': 'episode',
                 'title': ep.get('title') or item.get('title'),
@@ -306,7 +358,7 @@ def main():
                 'number': number,
                 'ids': ep.get('ids') or item.get('ids'),
                 'runtime': ep.get('runtime') or item.get('runtime'),
-                'rating': ep.get('rating') or item.get('rating'),
+                'rating': rating,
                 'show': {'title': (item.get('show') or {}).get('title') or item.get('extracted_show_title')},
                 'genres': (item.get('show') or {}).get('genres') or item.get('genres'),
                 'year': (item.get('show') or {}).get('year') or item.get('year'),
@@ -516,6 +568,7 @@ def main():
     # Use RPDB for both (no API calls, instant) - some show posters may be placeholders but it's fast
     show_poster_cache = {}  # Cache posters by show trakt_id
     show_ids_cache = {}  # Cache show IDs by show title
+    show_rating_cache = {}  # Cache ratings by show trakt_id
     
     print(f"\n=== Building image URLs ({'disabled' if args.no_images else 'RPDB'}) ===")
     
@@ -558,6 +611,19 @@ def main():
                 except Exception as e:
                     if args.verbose:
                         print(f"  Failed to fetch IDs for '{show_title}': {e}")
+        
+        # Update the original history items with fetched show IDs so they get cached
+        if show_ids_cache:
+            print(f"  Updating {len(show_ids_cache)} shows with fetched IDs in cache...")
+            for it in history:
+                if it.get('force_type') == 'episode':
+                    show = it.get('show') or {}
+                    show_title = show.get('title') if isinstance(show, dict) else None
+                    if show_title and show_title in show_ids_cache:
+                        # Update the show's IDs in the history item
+                        if not isinstance(it.get('show'), dict):
+                            it['show'] = {}
+                        it['show']['ids'] = show_ids_cache[show_title]
     
     # Build RPDB URLs
     for it in history:
@@ -619,6 +685,63 @@ def main():
     
     print(f"  Cached {len(show_poster_cache)} unique show posters")
 
+    # Fetch show ratings for episodes (lightweight - just ratings, no full enrichment)
+    # This runs even with --no-enrichment to optimize rating data
+    print("\n=== Fetching show ratings for episodes ===")
+    show_title_to_id_ratings = {}
+    for it in history:
+        if it.get('force_type') == 'episode':
+            show = it.get('show') or {}
+            show_title = show.get('title') if isinstance(show, dict) else None
+            if not show_title:
+                show_title = it.get('extracted_show_title')
+            
+            if show_title and show_title not in show_title_to_id_ratings:
+                show_ids = show.get('ids') if isinstance(show, dict) else None
+                if show_ids and isinstance(show_ids, dict):
+                    show_trakt_id = show_ids.get('trakt')
+                    if show_trakt_id:
+                        show_title_to_id_ratings[show_title] = show_trakt_id
+    
+    # Fetch just the rating for each show (minimal API call)
+    for show_title, show_trakt_id in show_title_to_id_ratings.items():
+        if show_trakt_id not in show_rating_cache:
+            try:
+                # Fetch show with minimal extended parameter - just need rating
+                show_obj = trakt_main.Trakt[f'shows/{show_trakt_id}'].get()
+                rating = None
+                if hasattr(show_obj, 'rating'):
+                    rating = show_obj.rating
+                elif hasattr(show_obj, 'get'):
+                    rating = show_obj.get('rating')
+                elif hasattr(show_obj, '__dict__'):
+                    rating = vars(show_obj).get('rating')
+                
+                if rating is not None:
+                    # Convert to float to ensure JSON serialization works
+                    try:
+                        rating = float(rating)
+                        show_rating_cache[show_trakt_id] = rating
+                    except (ValueError, TypeError):
+                        pass
+            except Exception:
+                pass
+    
+    # Apply cached show ratings to episodes
+    for it in history:
+        if it.get('force_type') == 'episode':
+            show = it.get('show') or {}
+            show_title = show.get('title') if isinstance(show, dict) else None
+            if not show_title:
+                show_title = it.get('extracted_show_title')
+            
+            if show_title:
+                show_trakt_id = show_title_to_id_ratings.get(show_title)
+                if show_trakt_id and show_trakt_id in show_rating_cache:
+                    it['show_rating'] = show_rating_cache[show_trakt_id]
+    
+    print(f"  Cached {len(show_rating_cache)} show ratings (will be reused for all episodes)")
+
     # Enrich episodes with show details (genres and year)
     # Build a show title to trakt_id mapping for episodes
     if not getattr(args, 'no_enrichment', False):
@@ -667,6 +790,12 @@ def main():
                     else:
                         sd = dict(show_obj) if show_obj else {}
                     show_details[show_trakt_id] = sd
+                    # Cache show rating for use in episodes (convert to float for JSON)
+                    if sd and sd.get('rating') is not None:
+                        try:
+                            show_rating_cache[show_trakt_id] = float(sd.get('rating'))
+                        except (ValueError, TypeError):
+                            pass
                 except Exception:
                     show_details[show_trakt_id] = None
         
@@ -690,11 +819,21 @@ def main():
                         # Add year from show details
                         if sd.get('year') and not it.get('year'):
                             it['year'] = sd.get('year')
+                        # Cache show rating from full enrichment if available and not already cached
+                        if sd.get('rating') is not None and show_trakt_id not in show_rating_cache:
+                            try:
+                                rating_val = float(sd.get('rating'))
+                                show_rating_cache[show_trakt_id] = rating_val
+                                it['show_rating'] = rating_val
+                            except (ValueError, TypeError):
+                                pass
                         # Update show object with genres and year for normalization
                         if not isinstance(it.get('show'), dict):
                             it['show'] = {}
                         it['show']['genres'] = sd.get('genres')
                         it['show']['year'] = sd.get('year')
+        
+        print(f"  Enriched {enriched_count} episodes with show metadata")
     else:
         print("\n=== Skipping show enrichment (--no-enrichment) ===")
 
@@ -812,7 +951,49 @@ def main():
     else:
         print("\n=== Skipping cast fetch (--no-cast flag) ===")
 
-    simplified = [normalize(i) for i in history]
+    # Normalize newly processed items
+    simplified_new = [normalize(i) for i in history]
+    
+    # Load previously processed items from output cache if available
+    simplified = simplified_new
+    if cached_items and len(new_items) < len(deduped):
+        # We have cached items - need to merge
+        print(f"\n=== Merging {len(simplified_new)} new processed items with cache ===")
+        
+        # Load the existing processed output
+        if os.path.exists(OUT_PATH):
+            try:
+                with open(OUT_PATH, 'r') as f:
+                    cached_output = json.load(f)
+                    cached_processed_items = cached_output.get('items', [])
+                
+                # Build a set of keys from new items to avoid duplicates
+                new_item_keys = set()
+                for item in simplified_new:
+                    # Use same key logic as deduplication
+                    trakt_id = (item.get('ids') or {}).get('trakt')
+                    key_id = str(trakt_id) if trakt_id else (item.get('title') or '')
+                    watched_day = str(item.get('watched_at') or '')[:10]
+                    key = (item.get('type'), key_id, watched_day)
+                    new_item_keys.add(key)
+                
+                # Merge: new items + cached items (excluding any that are in new)
+                simplified = simplified_new.copy()
+                for cached_item in cached_processed_items:
+                    trakt_id = (cached_item.get('ids') or {}).get('trakt')
+                    key_id = str(trakt_id) if trakt_id else (cached_item.get('title') or '')
+                    watched_day = str(cached_item.get('watched_at') or '')[:10]
+                    key = (cached_item.get('type'), key_id, watched_day)
+                    
+                    if key not in new_item_keys:
+                        simplified.append(cached_item)
+                
+                print(f"  Total items after merge: {len(simplified)} ({len(simplified_new)} new + {len(simplified) - len(simplified_new)} cached)")
+            except Exception as e:
+                print(f"  Warning: Could not load cached processed items: {e}")
+                print(f"  Using only newly processed items")
+                simplified = simplified_new
+    
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     
     end_time = datetime.now()
@@ -830,9 +1011,9 @@ def main():
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     os.makedirs(os.path.dirname(RAW_PATH), exist_ok=True)
     
-    # Write raw data first (for caching)
+    # Write raw data first (for caching) - save ALL deduped items (new + cached)
     with open(RAW_PATH, 'w') as f:
-        json.dump(history, f, indent=2)
+        json.dump(deduped, f, indent=2)
     print(f'Wrote raw data: {RAW_PATH}')
     
     # Write processed output

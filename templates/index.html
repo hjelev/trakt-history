@@ -32,10 +32,49 @@
       .meta-controls .form-select.form-select-sm {height: calc(1.5rem + 0.5rem); padding: .15rem .4rem; font-size: .85rem}
       .meta-controls select#media_top, .meta-controls select#media {min-width: 110px}
       .meta-controls select#period_top, .meta-controls select#period {min-width: 120px}
+      
+      /* Mobile responsive styles */
       @media (max-width:720px) {
+        body { margin: 12px }
         .top-row {flex-direction:column;align-items:stretch}
-        .meta-controls {margin-top:8px}
+        .meta-controls {margin-top:8px; flex-wrap: wrap}
+        .meta-controls form { flex-wrap: wrap; width: 100% }
+        .meta-controls .form-label { display: none } /* Hide labels on mobile */
+        .meta-controls select { min-width: 80px !important; flex: 1 }
+        
+        /* Stack header elements */
+        .d-flex.justify-content-between { flex-direction: column; gap: 12px; align-items: flex-start !important }
+        .d-flex.justify-content-between h1 { font-size: 1.4rem }
+        .d-flex.justify-content-between form { width: 100%; max-width: 100% !important }
+        
+        /* Make cards responsive */
+        .cards { justify-content: center; gap: 16px }
+        .card, .card-media { width: 160px; flex: 0 0 160px; max-width: 160px }
+        .card-body { padding: 0.5rem }
+        .listing-title { font-size: 0.85rem }
+        .listing-sub { font-size: 0.75rem }
+        .rating-badge { font-size: 0.75rem; padding: 0.15rem 0.3rem }
+        
+        /* Better pagination on mobile */
+        .pagination { font-size: 0.85rem }
+        .bottom-row, .top-row { gap: 8px }
+        .bottom-row .meta-controls, .top-row .meta-controls { width: 100% }
+        
+        /* Stats section responsive */
+        .meta .row .col-md-3 { width: 100%; margin-bottom: 8px }
+        .meta { font-size: 0.85rem }
+        
+        /* Search bar mobile */
+        .d-flex.justify-content-between .btn { padding: 0.375rem 0.75rem; font-size: 0.9rem }
       }
+      
+      /* Small mobile phones */
+      @media (max-width:400px) {
+        .card, .card-media { width: 140px; flex: 0 0 140px; max-width: 140px }
+        .cards { gap: 10px }
+        body { margin: 8px }
+      }
+      
       /* Dark mode: follow system preference */
       @media (prefers-color-scheme: dark) {
         body { background: #07101a; color: #dbeefc }
