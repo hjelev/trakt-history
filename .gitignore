@@ -34,3 +34,5 @@ _data/
 # OS
 .DS_Store
 Thumbs.db
+
+trakt-app.service
