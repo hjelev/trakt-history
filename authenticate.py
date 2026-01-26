@@ -47,11 +47,51 @@ def authenticate():
     print(f"\n3. Waiting for authorization (expires in {code.get('expires_in')} seconds)...")
     print("   Press Ctrl+C to cancel\n")
     
-    # Poll for authorization
+    # Poll for authorization - manual HTTP polling
     try:
-        token = Trakt['oauth/device'].poll(**code)
+        import time
+        import requests
+        
+        device_code = code.get('device_code')
+        interval = code.get('interval', 5)
+        expires_at = time.time() + code.get('expires_in', 600)
+        
+        print("   Waiting for authorization...")
+        
+        while time.time() < expires_at:
+            time.sleep(interval)
+            
+            # Make direct POST request to token endpoint
+            token_response = requests.post(
+                'https://api.trakt.tv/oauth/device/token',
+                json={
+                    'code': device_code,
+                    'client_id': CLIENT_ID,
+                    'client_secret': CLIENT_SECRET
+                },
+                headers={
+                    'Content-Type': 'application/json'
+                }
+            )
+            
+            if token_response.status_code == 200:
+                token = token_response.json()
+                break
+            elif token_response.status_code == 400:
+                # Still waiting for user authorization
+                continue
+            else:
+                print(f"\n✗ Unexpected response: {token_response.status_code}")
+                print(token_response.text)
+                return False
+        else:
+            print("\n✗ Authentication timed out")
+            return False
+            
     except Exception as e:
         print(f"\n✗ Polling failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False
     
     if not token:

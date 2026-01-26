@@ -313,13 +313,24 @@ def refresh():
                 flash(f'Data is fresh (updated {int(age)}s ago). Skipping refresh.', 'success')
                 return redirect(url_for('index'))
 
-        # Run the updater in the trakt directory
-        proc = subprocess.run(['python3', updater], cwd=os.path.dirname(__file__), capture_output=True, text=True, timeout=300)
+        # Run the updater with --no-cast and --no-enrichment for faster web refreshes
+        # Cast fetching and show enrichment require many API calls and can take 5-10+ minutes
+        # Users can run manually with full data: python3 scripts/update_trakt_local.py
+        # Increase timeout to 15 minutes for very slow connections
+        proc = subprocess.run(
+            ['python3', updater, '--no-cast', '--no-enrichment'], 
+            cwd=os.path.dirname(__file__), 
+            capture_output=True, 
+            text=True, 
+            timeout=900
+        )
         if proc.returncode == 0:
-            flash('Refresh completed successfully (updater)', 'success')
+            flash('Refresh completed successfully', 'success')
         else:
             msg = proc.stderr.strip() or proc.stdout.strip() or f'return code {proc.returncode}'
             flash(f'Refresh failed: {msg[:1000]}', 'error')
+    except subprocess.TimeoutExpired:
+        flash('Refresh timed out after 15 minutes. Try running manually: python3 scripts/update_trakt_local.py --no-cast --no-enrichment', 'error')
     except Exception as e:
         flash(f'Failed to run updater: {e}', 'error')
 

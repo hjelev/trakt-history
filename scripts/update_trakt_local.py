@@ -38,12 +38,14 @@ MAIN_PY = os.path.join(TRAKT_DIR, 'main.py')
 print(f"update_trakt_local.py: using TRAKT_DIR={TRAKT_DIR}")
 
 def main():
-    start_time = datetime.utcnow()
+    start_time = datetime.now()
     
     # CLI flags for quicker debug runs
     parser = argparse.ArgumentParser(description='Update local Trakt history and thumbnails')
     parser.add_argument('--limit', type=int, default=0, help='Limit number of history items processed (0 = all)')
     parser.add_argument('--no-images', action='store_true', help='Do not fetch images/thumbnails')
+    parser.add_argument('--no-cast', action='store_true', help='Do not fetch cast information (much faster)')
+    parser.add_argument('--no-enrichment', action='store_true', help='Do not enrich episodes with show genres/year (much faster)')
     parser.add_argument('--verbose', action='store_true', help='Verbose logging')
     parser.add_argument('--force', action='store_true', help='Force reprocessing even if raw data unchanged')
     args = parser.parse_args()
@@ -69,9 +71,84 @@ def main():
     if not authed:
         raise SystemExit('Authentication failed; ensure trakt/trakt.json exists in the trakt folder')
 
-    history_objs = trakt_main.Trakt['sync/history'].get(pagination=True, per_page=100, extended='full')
+    # Check for existing cache to enable incremental updates
+    start_at = None
+    cached_items = []
+    if os.path.exists(RAW_PATH) and not args.force:
+        try:
+            with open(RAW_PATH, 'r') as f:
+                cached_items = json.load(f)
+            
+            # Find the most recent watched_at timestamp
+            if cached_items:
+                timestamps = []
+                for item in cached_items:
+                    watched = item.get('watched_at_iso') or item.get('watched_at')
+                    if watched:
+                        try:
+                            if isinstance(watched, str):
+                                # Parse ISO format
+                                ts = datetime.fromisoformat(watched.replace('Z', '+00:00'))
+                            else:
+                                ts = watched
+                            timestamps.append(ts)
+                        except Exception:
+                            pass
+                
+                if timestamps:
+                    latest = max(timestamps)
+                    start_at = latest
+                    print(f"Found {len(cached_items)} cached items, latest watched: {latest.isoformat()}")
+                    print("Fetching only new items since last update (incremental mode)...")
+        except Exception as e:
+            print(f"Could not read cache for incremental update: {e}")
+            cached_items = []
+            start_at = None
+
+    if start_at:
+        print(f"Fetching new items watched after {start_at.isoformat()}...")
+    else:
+        print("Fetching full watch history from Trakt API...")
+    
+    try:
+        # Use extended='full' to get all metadata including images
+        # Note: Trakt API does not include cast in sync/history endpoint
+        # Set a reasonable timeout
+        import socket
+        old_timeout = socket.getdefaulttimeout()
+        socket.setdefaulttimeout(60)  # 60 second timeout for slower connections
+        
+        print("Calling Trakt API...")
+        # Fetch with start_at for incremental updates
+        if start_at:
+            history_objs = trakt_main.Trakt['sync/history'].get(
+                pagination=True, 
+                per_page=100, 
+                extended='full',
+                start_at=start_at  # Pass datetime object directly, not ISO string
+            )
+        else:
+            history_objs = trakt_main.Trakt['sync/history'].get(pagination=True, per_page=100, extended='full')
+        print("API call successful, processing results...")
+        
+        socket.setdefaulttimeout(old_timeout)  # Restore original timeout
+    except socket.timeout as e:
+        print(f"Timeout error fetching history from Trakt API: {e}")
+        import traceback
+        traceback.print_exc()
+        raise SystemExit(f'API timeout - check network connection: {e}')
+    except Exception as e:
+        print(f"Error fetching history from Trakt API: {e}")
+        import traceback
+        traceback.print_exc()
+        raise SystemExit(f'Failed to fetch history: {e}')
+    
+    if history_objs is None:
+        raise SystemExit('Trakt API returned None - check authentication token or API status')
+    
     history = []
     seen = 0
+    print(f"Processing history items...")
     for item in history_objs:
         d = item.to_dict()
         d['force_type'] = 'movie' if type(item).__name__ == 'Movie' else 'episode'
@@ -92,7 +169,17 @@ def main():
             if args.verbose:
                 print(f'--limit reached: {seen} items')
             break
+    
+    print(f"Fetched {len(history)} new items from Trakt")
+    
+    # Merge with cached items for incremental updates
+    if cached_items:
+        print(f"Merging {len(history)} new items with {len(cached_items)} cached items...")
+        # Combine new and cached, keeping new items first
+        history = history + cached_items
+        print(f"Total items after merge: {len(history)}")
 
+    print("\n=== Deduplicating entries ===")
     # Remove obvious duplicates: keep first occurrence of items with the same
     # (force_type, trakt id or title fallback, watched_at_iso). This avoids
     # showing the same movie twice when Trakt returned duplicates.
@@ -136,36 +223,17 @@ def main():
         seen_keys.add(key)
         deduped.append(it)
 
-    os.makedirs(os.path.dirname(RAW_PATH), exist_ok=True)
+    print(f"After deduplication: {len(deduped)} items (removed {len(history) - len(deduped)} duplicates)")
 
-    # If the existing raw cache is identical to the newly fetched raw data,
-    # skip rewriting and skip the expensive normalization/image work. This
-    # provides a full-cache behavior: only re-run normalization when Trakt
-    # data actually changed.
-    raw_changed = True
-    if os.path.exists(RAW_PATH):
-        try:
-            with open(RAW_PATH, 'r') as f:
-                old_raw = json.load(f)
-            # Compare canonical JSON (sort keys) to detect changes
-            try:
-                if json.dumps(old_raw, sort_keys=True) == json.dumps(deduped, sort_keys=True):
-                    raw_changed = False
-            except Exception:
-                # If JSON serialization comparison fails, treat as changed
-                raw_changed = True
-        except Exception:
-            raw_changed = True
-
-    if not raw_changed and not args.force:
-        print('Raw Trakt history unchanged; skipping normalization and image fetching.')
-        print('Use --force to reprocess anyway.')
+    # Check if we actually got any new items
+    if start_at and len(deduped) == len(cached_items):
+        print('\nNo new items found since last update.')
+        print('Use --force to reprocess all items anyway.')
         return
 
-    # write new raw file and continue processing
-    with open(RAW_PATH, 'w') as f:
-        json.dump(deduped, f, indent=2)
+    os.makedirs(os.path.dirname(RAW_PATH), exist_ok=True)
 
+    print("\n=== Processing items (normalization and image fetching) ===")
     # replace history with deduped list for further processing
     history = deduped
 
@@ -260,13 +328,25 @@ def main():
     TRAKT_CLIENT_ID = os.getenv('TRAKT_CLIENT_ID')
     RPDB_API_KEY = os.getenv('RPDB_API_KEY')
 
+    print(f"\n=== Starting item processing (total: {len(history)} items) ===")
+    if not args.no_images and RPDB_API_KEY:
+        print("RPDB image fetching enabled")
+    else:
+        print("Image fetching disabled")
+    
     # Attempt to resolve missing seasons by querying show seasons when possible
     show_cache = {}
     show_details = {}
     movie_details = {}
     show_cast = {}
     movie_cast = {}
+    
+    processed_count = 0
     for it in history:
+        processed_count += 1
+        if processed_count % 50 == 0:
+            print(f"  Processing: {processed_count}/{len(history)} items...")
+        
         if it.get('force_type') == 'episode':
             # prefer extracted_season if present
             if it.get('extracted_season') is not None:
@@ -430,366 +510,336 @@ def main():
             if it.get('resolved_season') is not None:
                 it['extracted_season'] = it.get('resolved_season')
 
-    # Attempt to attach thumbnail URLs for episodes and movies by querying
-    # Trakt details (extended=images) for shows/movies when available.
-    for it in history:
-        thumb = None
-        # Prefer episode-level images if present
-        ep = it.get('episode') or {}
-        if isinstance(ep, dict) and ep.get('images'):
-            imgs = ep.get('images')
-            # try to find first available url in nested dicts
-            for v in imgs.values():
-                if isinstance(v, dict):
-                    for key in ('thumb', 'screenshot', 'poster', 'full'):
-                        if v.get(key):
-                            thumb = v.get(key)
-                            break
-                if thumb:
-                    break
-
-        # If no episode image, prefer RPDB (RatingPosterDB) if API key is configured
-        # RPDB usage format: https://api.ratingposterdb.com/{apiKey}/{mediaType}/poster-default/{mediaId}.jpg
-        # mediaType can be 'imdb', 'tmdb' or 'tvdb'. For TMDB use 'movie-{id}' or 'series-{id}'
-        if not thumb and RPDB_API_KEY and not args.no_images:
-            # try imdb first
-            imdb_id = None
-            tmdb_id = None
-            tvdb_id = None
-            
-            # For episodes, try to use show IDs if available to get show poster
-            # Otherwise fall back to episode IDs
+    # Attach thumbnail URLs - optimized with show-level caching
+    # For episodes: all episodes of the same show share the same poster (much faster)
+    # For movies: each movie gets its own poster
+    # Use RPDB for both (no API calls, instant) - some show posters may be placeholders but it's fast
+    show_poster_cache = {}  # Cache posters by show trakt_id
+    show_ids_cache = {}  # Cache show IDs by show title
+    
+    print(f"\n=== Building image URLs ({'disabled' if args.no_images else 'RPDB'}) ===")
+    
+    # First, collect show titles that need IDs
+    if not args.no_images:
+        shows_needing_ids = {}
+        for it in history:
             if it.get('force_type') == 'episode':
                 show = it.get('show') or {}
                 show_ids = show.get('ids') if isinstance(show, dict) else None
-                if show_ids and isinstance(show_ids, dict):
-                    imdb_id = show_ids.get('imdb')
-                    tmdb_id = show_ids.get('tmdb')
-                    tvdb_id = show_ids.get('tvdb')
+                show_title = show.get('title') if isinstance(show, dict) else None
                 
-                # If no show IDs, fall back to episode IDs
-                if not (imdb_id or tmdb_id or tvdb_id):
-                    ids = (it.get('ids') or {})
-                    if isinstance(ids, dict):
-                        imdb_id = ids.get('imdb')
-                        tmdb_id = ids.get('tmdb')
-                        tvdb_id = ids.get('tvdb')
-            else:
-                # For movies, use movie ids
-                ids = (it.get('ids') or {})
-                if isinstance(ids, dict):
-                    imdb_id = ids.get('imdb')
-                    tmdb_id = ids.get('tmdb')
-                    tvdb_id = ids.get('tvdb')
-            # prefer IMDB id when available
-            if imdb_id:
-                media_type = 'imdb'
-                media_id = imdb_id
-            elif tmdb_id:
-                # need to decide movie vs series; check force_type or show presence
-                if it.get('force_type') == 'movie':
-                    media_type = 'tmdb'
-                    media_id = f'movie-{tmdb_id}'
-                else:
-                    media_type = 'tmdb'
-                    media_id = f'series-{tmdb_id}'
-            elif tvdb_id:
-                media_type = 'tvdb'
-                media_id = tvdb_id
-            else:
-                media_type = None
-                media_id = None
-
-            if media_type and media_id:
+                # If show IDs are empty or missing, we need to fetch them
+                if show_title and (not show_ids or not show_ids.get('trakt')):
+                    if show_title not in shows_needing_ids:
+                        shows_needing_ids[show_title] = show
+        
+        # Fetch show IDs for shows that don't have them
+        if shows_needing_ids and TRAKT_CLIENT_ID:
+            print(f"  Looking up IDs for {len(shows_needing_ids)} shows...")
+            for show_title in shows_needing_ids:
                 try:
-                    # Request a reasonably small poster size to save bandwidth. RPDB supports
-                    # size query param (medium/large/verylarge); request `medium` which is the
-                    # smallest documented good-quality size.
-                    rpdb_url = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/{media_type}/poster-default/{media_id}.jpg?fallback=true&size=medium'
-                    # try HEAD first; if the server doesn't support HEAD, fall back to a lightweight GET
-                    try:
-                        h = requests.head(rpdb_url, timeout=5)
-                        if args.verbose:
-                            print(f'RPDB HEAD {rpdb_url} -> {getattr(h, "status_code", "ERR")}')
-                        if h.status_code == 200:
-                            thumb = rpdb_url
-                        else:
-                            # sized URL failed — try fallback without size parameter
-                            fallback_url = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/{media_type}/poster-default/{media_id}.jpg?fallback=true'
-                            if args.verbose:
-                                print(f'RPDB sized URL failed, trying fallback {fallback_url}')
-                            try:
-                                h2 = requests.head(fallback_url, timeout=5)
+                    q = urllib.parse.quote_plus(show_title)
+                    url = f"https://api.trakt.tv/search/show?query={q}"
+                    headers = {
+                        'Content-Type': 'application/json',
+                        'trakt-api-version': '2',
+                        'trakt-api-key': TRAKT_CLIENT_ID,
+                    }
+                    r = requests.get(url, headers=headers, timeout=10)
+                    if r.status_code == 200:
+                        results = r.json()
+                        if results:
+                            first_show = results[0].get('show', {})
+                            show_ids = first_show.get('ids', {})
+                            if show_ids:
+                                show_ids_cache[show_title] = show_ids
                                 if args.verbose:
-                                    print(f'RPDB HEAD {fallback_url} -> {getattr(h2, "status_code", "ERR")}')
-                                if h2.status_code == 200:
-                                    thumb = fallback_url
-                                else:
-                                    try:
-                                        g = requests.get(fallback_url, stream=True, timeout=10)
-                                        if args.verbose:
-                                            print(f'RPDB GET {fallback_url} -> {getattr(g, "status_code", "ERR")}')
-                                        if g.status_code == 200:
-                                            thumb = fallback_url
-                                        g.close()
-                                    except Exception:
-                                        if args.verbose:
-                                            print(f'RPDB GET failed for fallback {fallback_url}')
-                            except Exception:
-                                # fallback HEAD failed; try GET on the original sized URL as last resort
-                                try:
-                                    g = requests.get(rpdb_url, stream=True, timeout=10)
-                                    if args.verbose:
-                                        print(f'RPDB GET (sized) {rpdb_url} -> {getattr(g, "status_code", "ERR")}')
-                                    if g.status_code == 200:
-                                        thumb = rpdb_url
-                                    g.close()
-                                except Exception:
-                                    if args.verbose:
-                                        print(f'RPDB request error for {rpdb_url}')
-                    except Exception:
-                        # HEAD itself failed (some servers block HEAD). Try GET as a fallback without size first
-                        try:
-                            fallback_url = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/{media_type}/poster-default/{media_id}.jpg?fallback=true'
-                            g = requests.get(fallback_url, stream=True, timeout=10)
-                            if args.verbose:
-                                print(f'RPDB GET (no-HEAD, fallback) {fallback_url} -> {getattr(g, "status_code", "ERR")}')
-                            if g.status_code == 200:
-                                thumb = fallback_url
-                            g.close()
-                        except Exception:
-                            if args.verbose:
-                                print(f'RPDB request error for {media_type}/{media_id}')
-                except Exception:
+                                    print(f"  Found IDs for '{show_title}': {show_ids}")
+                except Exception as e:
                     if args.verbose:
-                        print(f'RPDB: unexpected error building URL for {media_type}/{media_id}')
-
-        # If no episode image, try show images (Trakt) if RPDB wasn't available or failed
-        if not thumb and it.get('force_type') == 'episode':
+                        print(f"  Failed to fetch IDs for '{show_title}': {e}")
+    
+    # Build RPDB URLs
+    for it in history:
+        thumb = None
+        
+        # For episodes, build and cache show poster URL
+        if it.get('force_type') == 'episode' and not args.no_images and RPDB_API_KEY:
             show = it.get('show') or {}
+            show_title = show.get('title') if isinstance(show, dict) else None
             show_ids = show.get('ids') if isinstance(show, dict) else None
-            show_trakt_id = show_ids.get('trakt') if (show_ids and isinstance(show_ids, dict)) else None
-            if show_trakt_id:
-                if show_trakt_id not in show_details:
-                    try:
-                        show_details[show_trakt_id] = trakt_main.Trakt[f'shows/{show_trakt_id}'].get(extended='full,images')
-                    except Exception:
-                        show_details[show_trakt_id] = None
-                sd = show_details.get(show_trakt_id) or {}
-                imgs = sd.get('images') if isinstance(sd, dict) else None
-                if imgs:
-                    for v in imgs.values():
-                        if isinstance(v, dict):
-                            for key in ('thumb', 'poster', 'full'):
-                                if v.get(key):
-                                    thumb = v.get(key)
-                                    break
-                        if thumb:
-                            break
-
-        # If still no thumb and item is movie, try movie images
-        if not thumb and it.get('force_type') == 'movie':
+            
+            # Use cached IDs if we fetched them
+            if show_title and show_title in show_ids_cache:
+                show_ids = show_ids_cache[show_title]
+            
+            show_trakt_id = show_ids.get('trakt') if show_ids else None
+            
+            # Check cache first
+            if show_trakt_id and show_trakt_id in show_poster_cache:
+                thumb = show_poster_cache[show_trakt_id]
+            elif show_ids:
+                # Build RPDB URL from show IDs (prioritize TVDB for TV shows)
+                tvdb_id = show_ids.get('tvdb')
+                imdb_id = show_ids.get('imdb')
+                tmdb_id = show_ids.get('tmdb')
+                
+                if tvdb_id:
+                    thumb = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/tvdb/poster-default/{tvdb_id}.jpg?fallback=true'
+                elif imdb_id:
+                    thumb = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/imdb/poster-default/{imdb_id}.jpg?fallback=true'
+                elif tmdb_id:
+                    thumb = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/tmdb/poster-default/series-{tmdb_id}.jpg?fallback=true'
+                
+                # Cache for reuse
+                if show_trakt_id and thumb:
+                    show_poster_cache[show_trakt_id] = thumb
+        
+        # For movies, build RPDB URL from movie IDs
+        elif it.get('force_type') == 'movie' and not args.no_images and RPDB_API_KEY:
             movie = it.get('movie') or it
-            movie_ids = movie.get('ids') if isinstance(movie, dict) else None
-            movie_trakt_id = movie_ids.get('trakt') if movie_ids else None
-            if movie_trakt_id:
-                if movie_trakt_id not in movie_details:
-                    try:
-                        movie_details[movie_trakt_id] = trakt_main.Trakt[f'movies/{movie_trakt_id}'].get(extended='images')
-                    except Exception:
-                        movie_details[movie_trakt_id] = None
-                md = movie_details.get(movie_trakt_id) or {}
-                imgs = md.get('images') if isinstance(md, dict) else None
-                if imgs:
-                    for v in imgs.values():
-                        if isinstance(v, dict):
-                            for key in ('thumb', 'poster', 'full'):
-                                if v.get(key):
-                                    thumb = v.get(key)
-                                    break
-                        if thumb:
-                            break
+            ids = movie.get('ids') if isinstance(movie, dict) else None
+            if ids and isinstance(ids, dict):
+                imdb_id = ids.get('imdb')
+                tmdb_id = ids.get('tmdb')
+                tvdb_id = ids.get('tvdb')
+                
+                if imdb_id:
+                    thumb = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/imdb/poster-default/{imdb_id}.jpg?fallback=true'
+                elif tmdb_id:
+                    thumb = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/tmdb/poster-default/movie-{tmdb_id}.jpg?fallback=true'
+                elif tvdb_id:
+                    thumb = f'https://api.ratingposterdb.com/{RPDB_API_KEY}/tvdb/poster-default/{tvdb_id}.jpg?fallback=true'
+                
+                if args.verbose and thumb:
+                    print(f'Movie poster: {thumb}')
 
         if thumb:
             it['thumbnail'] = thumb
+    
+    print(f"  Cached {len(show_poster_cache)} unique show posters")
 
     # Enrich episodes with show details (genres and year)
     # Build a show title to trakt_id mapping for episodes
-    show_title_to_id = {}
-    for it in history:
-        if it.get('force_type') == 'episode':
-            show = it.get('show') or {}
-            show_title = show.get('title') if isinstance(show, dict) else None
-            if not show_title:
-                show_title = it.get('extracted_show_title')
-            
-            if show_title and show_title not in show_title_to_id:
-                # Try to search for the show to get its trakt ID
-                if TRAKT_CLIENT_ID:
+    if not getattr(args, 'no_enrichment', False):
+        print("\n=== Enriching episodes with show metadata ===")
+        show_title_to_id = {}
+        for it in history:
+            if it.get('force_type') == 'episode':
+                show = it.get('show') or {}
+                show_title = show.get('title') if isinstance(show, dict) else None
+                if not show_title:
+                    show_title = it.get('extracted_show_title')
+                
+                if show_title and show_title not in show_title_to_id:
+                    # Try to search for the show to get its trakt ID
+                    if TRAKT_CLIENT_ID:
+                        try:
+                            q = urllib.parse.quote_plus(show_title)
+                            url = f"https://api.trakt.tv/search/show?query={q}"
+                            headers = {
+                                'Content-Type': 'application/json',
+                                'trakt-api-version': '2',
+                                'trakt-api-key': TRAKT_CLIENT_ID,
+                            }
+                            r = requests.get(url, headers=headers, timeout=10)
+                            if r.status_code == 200:
+                                results = r.json()
+                                if results:
+                                    # Take the first result (best match)
+                                    first_show = results[0].get('show', {})
+                                    show_trakt_id = first_show.get('ids', {}).get('trakt')
+                                    if show_trakt_id:
+                                        show_title_to_id[show_title] = show_trakt_id
+                        except Exception:
+                            pass
+        
+        # Now fetch show details for all discovered show IDs
+        for show_trakt_id in show_title_to_id.values():
+            if show_trakt_id not in show_details:
+                try:
+                    show_obj = trakt_main.Trakt[f'shows/{show_trakt_id}'].get(extended='full,images')
+                    # Convert Trakt Show object to dict
+                    if hasattr(show_obj, 'to_dict'):
+                        sd = show_obj.to_dict()
+                    elif hasattr(show_obj, '__dict__'):
+                        sd = vars(show_obj)
+                    else:
+                        sd = dict(show_obj) if show_obj else {}
+                    show_details[show_trakt_id] = sd
+                except Exception:
+                    show_details[show_trakt_id] = None
+        
+        # Finally, enrich episodes with show metadata
+        enriched_count = 0
+        for it in history:
+            if it.get('force_type') == 'episode':
+                show = it.get('show') or {}
+                show_title = show.get('title') if isinstance(show, dict) else None
+                if not show_title:
+                    show_title = it.get('extracted_show_title')
+                
+                show_trakt_id = show_title_to_id.get(show_title) if show_title else None
+                if show_trakt_id and show_trakt_id in show_details:
+                    sd = show_details.get(show_trakt_id) or {}
+                    if isinstance(sd, dict):
+                        # Add genres from show details
+                        if sd.get('genres') and not it.get('genres'):
+                            it['genres'] = sd.get('genres')
+                            enriched_count += 1
+                        # Add year from show details
+                        if sd.get('year') and not it.get('year'):
+                            it['year'] = sd.get('year')
+                        # Update show object with genres and year for normalization
+                        if not isinstance(it.get('show'), dict):
+                            it['show'] = {}
+                        it['show']['genres'] = sd.get('genres')
+                        it['show']['year'] = sd.get('year')
+    else:
+        print("\n=== Skipping show enrichment (--no-enrichment) ===")
+
+    # Fetch cast/actors for movies and shows (optional - can be disabled with --no-cast flag)
+    if not getattr(args, 'no_cast', False):
+        print("\n=== Fetching cast information ===")
+        headers = {
+            'Content-Type': 'application/json',
+            'trakt-api-version': '2',
+            'trakt-api-key': TRAKT_CLIENT_ID
+        }
+        
+        # Count unique items to fetch
+        unique_movies = set()
+        unique_shows = set()
+        for it in history:
+            if it.get('force_type') == 'movie':
+                movie_id = it.get('ids', {}).get('trakt')
+                if movie_id and movie_id not in movie_cast:
+                    unique_movies.add(movie_id)
+            elif it.get('force_type') == 'episode':
+                show = it.get('show') or {}
+                show_title = show.get('title') if isinstance(show, dict) else None
+                if not show_title:
+                    show_title = it.get('extracted_show_title')
+                show_id = show_title_to_id.get(show_title) if show_title else None
+                if show_id and show_id not in show_cast:
+                    unique_shows.add(show_id)
+        
+        print(f"Fetching cast for {len(unique_movies)} movies and {len(unique_shows)} shows...")
+        
+        fetched_movies = 0
+        fetched_shows = 0
+        for it in history:
+            if it.get('force_type') == 'movie':
+                movie_trakt_id = it.get('ids', {}).get('trakt')
+                if movie_trakt_id and movie_trakt_id not in movie_cast:
                     try:
-                        q = urllib.parse.quote_plus(show_title)
-                        url = f"https://api.trakt.tv/search/show?query={q}"
-                        headers = {
-                            'Content-Type': 'application/json',
-                            'trakt-api-version': '2',
-                            'trakt-api-key': TRAKT_CLIENT_ID,
-                        }
+                        url = f'https://api.trakt.tv/movies/{movie_trakt_id}/people'
                         r = requests.get(url, headers=headers, timeout=10)
                         if r.status_code == 200:
-                            results = r.json()
-                            if results:
-                                # Take the first result (best match)
-                                first_show = results[0].get('show', {})
-                                show_trakt_id = first_show.get('ids', {}).get('trakt')
-                                if show_trakt_id:
-                                    show_title_to_id[show_title] = show_trakt_id
-                    except Exception:
-                        pass
-    
-    # Now fetch show details for all discovered show IDs
-    for show_trakt_id in show_title_to_id.values():
-        if show_trakt_id not in show_details:
-            try:
-                show_obj = trakt_main.Trakt[f'shows/{show_trakt_id}'].get(extended='full,images')
-                # Convert Trakt Show object to dict
-                if hasattr(show_obj, 'to_dict'):
-                    sd = show_obj.to_dict()
-                elif hasattr(show_obj, '__dict__'):
-                    sd = vars(show_obj)
-                else:
-                    sd = dict(show_obj) if show_obj else {}
-                show_details[show_trakt_id] = sd
-            except Exception:
-                show_details[show_trakt_id] = None
-    
-    # Finally, enrich episodes with show metadata
-    enriched_count = 0
-    for it in history:
-        if it.get('force_type') == 'episode':
-            show = it.get('show') or {}
-            show_title = show.get('title') if isinstance(show, dict) else None
-            if not show_title:
-                show_title = it.get('extracted_show_title')
-            
-            show_trakt_id = show_title_to_id.get(show_title) if show_title else None
-            if show_trakt_id and show_trakt_id in show_details:
-                sd = show_details.get(show_trakt_id) or {}
-                if isinstance(sd, dict):
-                    # Add genres from show details
-                    if sd.get('genres') and not it.get('genres'):
-                        it['genres'] = sd.get('genres')
-                        enriched_count += 1
-                    # Add year from show details
-                    if sd.get('year') and not it.get('year'):
-                        it['year'] = sd.get('year')
-                    # Update show object with genres and year for normalization
-                    if not isinstance(it.get('show'), dict):
-                        it['show'] = {}
-                    it['show']['genres'] = sd.get('genres')
-                    it['show']['year'] = sd.get('year')
-
-    # Fetch cast/actors for movies and shows
-    print("\n=== Fetching cast information ===")
-    headers = {
-        'Content-Type': 'application/json',
-        'trakt-api-version': '2',
-        'trakt-api-key': TRAKT_CLIENT_ID
-    }
-    
-    for it in history:
-        if it.get('force_type') == 'movie':
-            movie_trakt_id = it.get('ids', {}).get('trakt')
-            if movie_trakt_id and movie_trakt_id not in movie_cast:
-                try:
-                    url = f'https://api.trakt.tv/movies/{movie_trakt_id}/people'
-                    r = requests.get(url, headers=headers, timeout=10)
-                    if r.status_code == 200:
-                        data = r.json()
-                        cast_list = data.get('cast', [])
-                        top_cast = []
-                        for c in cast_list[:5]:
-                            person = c.get('person', {})
-                            name = person.get('name')
-                            if name:
-                                top_cast.append(name)
-                        movie_cast[movie_trakt_id] = top_cast
-                        print(f"  Movie ID {movie_trakt_id}: {len(top_cast)} actors")
-                    else:
+                            data = r.json()
+                            cast_list = data.get('cast', [])
+                            top_cast = []
+                            for c in cast_list[:5]:
+                                person = c.get('person', {})
+                                name = person.get('name')
+                                if name:
+                                    top_cast.append(name)
+                            movie_cast[movie_trakt_id] = top_cast
+                            fetched_movies += 1
+                            if fetched_movies % 10 == 0:
+                                print(f"  Progress: {fetched_movies}/{len(unique_movies)} movies")
+                        else:
+                            movie_cast[movie_trakt_id] = []
+                    except Exception as e:
                         movie_cast[movie_trakt_id] = []
-                        print(f"  Movie ID {movie_trakt_id}: API returned {r.status_code}")
-                except Exception as e:
-                    movie_cast[movie_trakt_id] = []
-                    print(f"  Error fetching cast for movie {movie_trakt_id}: {e}")
-        
-        elif it.get('force_type') == 'episode':
-            show = it.get('show') or {}
-            show_title = show.get('title') if isinstance(show, dict) else None
-            if not show_title:
-                show_title = it.get('extracted_show_title')
+                        if args.verbose:
+                            print(f"  Error fetching cast for movie {movie_trakt_id}: {e}")
             
-            show_trakt_id = show_title_to_id.get(show_title) if show_title else None
-            if show_trakt_id and show_trakt_id not in show_cast:
-                try:
-                    url = f'https://api.trakt.tv/shows/{show_trakt_id}/people'
-                    r = requests.get(url, headers=headers, timeout=10)
-                    if r.status_code == 200:
-                        data = r.json()
-                        cast_list = data.get('cast', [])
-                        top_cast = []
-                        for c in cast_list[:5]:
-                            person = c.get('person', {})
-                            name = person.get('name')
-                            if name:
-                                top_cast.append(name)
-                        show_cast[show_trakt_id] = top_cast
-                        print(f"  Show ID {show_trakt_id}: {len(top_cast)} actors")
-                    else:
+            elif it.get('force_type') == 'episode':
+                show = it.get('show') or {}
+                show_title = show.get('title') if isinstance(show, dict) else None
+                if not show_title:
+                    show_title = it.get('extracted_show_title')
+                
+                show_trakt_id = show_title_to_id.get(show_title) if show_title else None
+                if show_trakt_id and show_trakt_id not in show_cast:
+                    try:
+                        url = f'https://api.trakt.tv/shows/{show_trakt_id}/people'
+                        r = requests.get(url, headers=headers, timeout=10)
+                        if r.status_code == 200:
+                            data = r.json()
+                            cast_list = data.get('cast', [])
+                            top_cast = []
+                            for c in cast_list[:5]:
+                                person = c.get('person', {})
+                                name = person.get('name')
+                                if name:
+                                    top_cast.append(name)
+                            show_cast[show_trakt_id] = top_cast
+                            fetched_shows += 1
+                            if fetched_shows % 5 == 0:
+                                print(f"  Progress: {fetched_shows}/{len(unique_shows)} shows")
+                        else:
+                            show_cast[show_trakt_id] = []
+                    except Exception as e:
                         show_cast[show_trakt_id] = []
-                        print(f"  Show ID {show_trakt_id}: API returned {r.status_code}")
-                except Exception as e:
-                    show_cast[show_trakt_id] = []
-                    print(f"  Error fetching cast for show {show_trakt_id}: {e}")
+                        if args.verbose:
+                            print(f"  Error fetching cast for show {show_trakt_id}: {e}")
 
-    # Add cast to items
-    print("\n=== Adding cast to items ===")
-    cast_added = 0
-    for it in history:
-        if it.get('force_type') == 'movie':
-            movie_trakt_id = it.get('ids', {}).get('trakt')
-            if movie_trakt_id and movie_trakt_id in movie_cast:
-                it['cast'] = movie_cast[movie_trakt_id]
-                if movie_cast[movie_trakt_id]:
-                    cast_added += 1
-        elif it.get('force_type') == 'episode':
-            show = it.get('show') or {}
-            show_title = show.get('title') if isinstance(show, dict) else None
-            if not show_title:
-                show_title = it.get('extracted_show_title')
-            
-            show_trakt_id = show_title_to_id.get(show_title) if show_title else None
-            if show_trakt_id and show_trakt_id in show_cast:
-                it['cast'] = show_cast[show_trakt_id]
-                if show_cast[show_trakt_id]:
-                    cast_added += 1
-    
-    print(f"Added cast to {cast_added} items")
+        # Add cast to items
+        print("\n=== Adding cast to items ===")
+        cast_added = 0
+        for it in history:
+            if it.get('force_type') == 'movie':
+                movie_trakt_id = it.get('ids', {}).get('trakt')
+                if movie_trakt_id and movie_trakt_id in movie_cast:
+                    it['cast'] = movie_cast[movie_trakt_id]
+                    if movie_cast[movie_trakt_id]:
+                        cast_added += 1
+            elif it.get('force_type') == 'episode':
+                show = it.get('show') or {}
+                show_title = show.get('title') if isinstance(show, dict) else None
+                if not show_title:
+                    show_title = it.get('extracted_show_title')
+                
+                show_trakt_id = show_title_to_id.get(show_title) if show_title else None
+                if show_trakt_id and show_trakt_id in show_cast:
+                    it['cast'] = show_cast[show_trakt_id]
+                    if show_cast[show_trakt_id]:
+                        cast_added += 1
+        
+        print(f"Added cast to {cast_added} items")
+    else:
+        print("\n=== Skipping cast fetch (--no-cast flag) ===")
 
     simplified = [normalize(i) for i in history]
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     
-    end_time = datetime.utcnow()
+    end_time = datetime.now()
     generation_time_seconds = (end_time - start_time).total_seconds()
     
     out = {
-        'generated_at': datetime.utcnow().isoformat() + 'Z',
+        'generated_at': datetime.now().isoformat(),
         'generation_time': round(generation_time_seconds, 2),
         'count': len(simplified),
         'items': simplified
     }
+    
+    # Write all files at once (minimize disk I/O for slow SD cards)
+    print("\n=== Writing output files ===")
+    os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
+    os.makedirs(os.path.dirname(RAW_PATH), exist_ok=True)
+    
+    # Write raw data first (for caching)
+    with open(RAW_PATH, 'w') as f:
+        json.dump(history, f, indent=2)
+    print(f'Wrote raw data: {RAW_PATH}')
+    
+    # Write processed output
     with open(OUT_PATH, 'w') as f:
         json.dump(out, f, indent=2)
-
-    print(f'Wrote {OUT_PATH} and {RAW_PATH}')
+    print(f'Wrote processed data: {OUT_PATH}')
+    
     print(f'Generation time: {generation_time_seconds:.2f} seconds')
 
 

@@ -107,6 +107,28 @@ Once authenticated, you can run the app normally.
 
 Visit `http://localhost:5000/refresh` to fetch the latest data from Trakt.
 
+**Note:** Web refresh uses `--no-cast --no-enrichment` flags for speed (~30-60 seconds on fast machines, ~1-2 minutes on RPi5). 
+
+To fetch full data including cast actors and show enrichment, run manually:
+
+```bash
+python scripts/update_trakt_local.py
+```
+
+**Speed options:**
+- **Fastest** (web refresh, no cast, no enrichment): ~30-60 seconds (Intel/AMD), ~1-2 minutes (RPi5)
+  ```bash
+  python scripts/update_trakt_local.py --no-cast --no-enrichment
+  ```
+- **With enrichment** (show genres/year, no cast): ~2-3 minutes
+  ```bash
+  python scripts/update_trakt_local.py --no-cast
+  ```
+- **Full data** (with cast and enrichment, slow): ~5-10 minutes (many API calls)
+  ```bash
+  python scripts/update_trakt_local.py
+  ```
+
 ## Project Structure
 
 ```
