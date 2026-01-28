@@ -240,10 +240,7 @@ trakt-history/
 │   └── update_trakt_local.py       # Data fetcher and processor
 └── _data/                          # Generated data (not in git)
     ├── trakt_history.json          # Processed watch history
-    ├── trakt_raw.json              # Raw API response cache
-    └── images/                     # Downloaded poster thumbnails
-        ├── movies/
-        └── shows/
+    └── trakt_raw.json              # Raw API response cache
 ```
 
 ## 🛠️ API Endpoints
@@ -292,12 +289,12 @@ RPDB_API_KEY=your_key        # For poster thumbnails
 Your personal ratings from Trakt.tv are displayed on each poster with a ⭐ badge in the top-right corner. Only items you've rated will show the badge.
 
 ### Poster Thumbnails
-High-quality poster images are fetched from RatingPosterDB when you provide an API key. Images are cached locally to avoid repeated downloads.
+High-quality poster images are loaded directly from RatingPosterDB CDN when you provide an API key. The app generates optimized image URLs for fast loading without local storage.
 
 ### Smart Caching
 - Raw API responses cached for 1 hour (configurable)
-- Processed data stored locally
-- Images downloaded once and reused
+- Processed data stored locally in JSON format
+- Poster URLs generated once and cached in data
 - Fast subsequent loads
 
 ### Responsive Design
@@ -313,7 +310,7 @@ Bootstrap 5 provides a modern, mobile-friendly interface that adapts to any scre
 **No posters showing:**
 - Check if you have RPDB_API_KEY in `.env`
 - Run update script without `--no-images` flag
-- Verify images are downloaded to `_data/images/`
+- Verify your RPDB API key is valid at https://ratingposterdb.com/
 
 **Service won't start:**
 - Check service status: `sudo systemctl status trakt-app.service`

@@ -329,7 +329,7 @@ def refresh():
         # Users can run manually with full data: python3 scripts/update_trakt_local.py
         # Increase timeout to 15 minutes for very slow connections
         proc = subprocess.run(
-            ['python3', updater, '--no-cast', '--no-enrichment'], 
+            ['python3', updater], 
             cwd=os.path.dirname(__file__), 
             capture_output=True, 
             text=True, 
