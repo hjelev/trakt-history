@@ -31,17 +31,38 @@ if os.path.exists(os.path.join(ROOT, 'main.py')):
 else:
     TRAKT_DIR = os.path.join(ROOT, 'trakt')
 
-RAW_PATH = os.path.join(TRAKT_DIR, '_data', 'trakt_raw.json')
-OUT_PATH = os.path.join(TRAKT_DIR, '_data', 'trakt_history.json')
 MAIN_PY = os.path.join(TRAKT_DIR, 'main.py')
 
-print(f"update_trakt_local.py: using TRAKT_DIR={TRAKT_DIR}")
+# Load environment to get primary user
+load_dotenv(os.path.join(TRAKT_DIR, '.env'))
+PRIMARY_USER = os.getenv('PRIMARY_USER')
+if not PRIMARY_USER:
+    raise SystemExit("PRIMARY_USER must be set in .env file")
+
+print(f"update_trakt_local.py: using TRAKT_DIR={TRAKT_DIR}, PRIMARY_USER={PRIMARY_USER}")
+
+def get_user_paths(username: str = None):
+    """Get raw and output paths for a user. If username is None, uses primary user."""
+    if username is None:
+        username = PRIMARY_USER
+    
+    if username == PRIMARY_USER:
+        # Primary user uses default paths for backward compatibility
+        raw_path = os.path.join(TRAKT_DIR, '_data', 'trakt_raw.json')
+        out_path = os.path.join(TRAKT_DIR, '_data', 'trakt_history.json')
+    else:
+        # Other users get prefixed files
+        raw_path = os.path.join(TRAKT_DIR, '_data', f'trakt_raw_{username}.json')
+        out_path = os.path.join(TRAKT_DIR, '_data', f'trakt_history_{username}.json')
+    
+    return raw_path, out_path
 
 def main():
     start_time = datetime.now()
     
     # CLI flags for quicker debug runs
     parser = argparse.ArgumentParser(description='Update local Trakt history and thumbnails')
+    parser.add_argument('--user', type=str, default=PRIMARY_USER, help=f'Username to update (default: {PRIMARY_USER})')
     parser.add_argument('--limit', type=int, default=0, help='Limit number of history items processed (0 = all)')
     parser.add_argument('--no-images', action='store_true', help='Do not fetch images/thumbnails')
     parser.add_argument('--no-cast', action='store_true', help='Do not fetch cast information (much faster)')
@@ -49,6 +70,12 @@ def main():
     parser.add_argument('--verbose', action='store_true', help='Verbose logging')
     parser.add_argument('--force', action='store_true', help='Force reprocessing even if raw data unchanged')
     args = parser.parse_args()
+    
+    username = args.user
+    RAW_PATH, OUT_PATH = get_user_paths(username)
+    print(f"Updating user: {username}")
+    print(f"  Raw cache: {RAW_PATH}")
+    print(f"  Output: {OUT_PATH}")
 
     if not os.path.exists(MAIN_PY):
         raise SystemExit('trakt/main.py not found')
@@ -69,7 +96,7 @@ def main():
         os.chdir(prev_cwd)
 
     if not authed:
-        raise SystemExit('Authentication failed; ensure trakt/trakt.json exists in the trakt folder')
+        raise SystemExit(f'Authentication failed; ensure trakt.json exists in {TRAKT_DIR}')
 
     # Check for existing cache to enable incremental updates
     start_at = None
@@ -119,17 +146,86 @@ def main():
         old_timeout = socket.getdefaulttimeout()
         socket.setdefaulttimeout(60)  # 60 second timeout for slower connections
         
-        print("Calling Trakt API...")
-        # Fetch with start_at for incremental updates
-        if start_at:
-            history_objs = trakt_main.Trakt['sync/history'].get(
-                pagination=True, 
-                per_page=100, 
-                extended='full',
-                start_at=start_at  # Pass datetime object directly, not ISO string
-            )
+        print(f"Calling Trakt API for user: {username}...")
+        # Fetch watch history
+        # For primary user, use sync/history (authenticated endpoint)
+        # For other users, use users/{id}/history (public endpoint)
+        if username == PRIMARY_USER:
+            # Use authenticated sync endpoint for primary user
+            if start_at:
+                history_objs = trakt_main.Trakt['sync/history'].get(
+                    pagination=True, 
+                    per_page=100, 
+                    extended='full',
+                    start_at=start_at
+                )
+            else:
+                history_objs = trakt_main.Trakt['sync/history'].get(pagination=True, per_page=100, extended='full')
         else:
-            history_objs = trakt_main.Trakt['sync/history'].get(pagination=True, per_page=100, extended='full')
+            # Use public user history endpoint for other users
+            # trakt.py doesn't support dynamic user IDs, so we'll use direct HTTP
+            # (requests is already imported at module level)
+            
+            # Get access token from the token file
+            token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
+            access_token = None
+            if os.path.exists(token_file_path):
+                with open(token_file_path, 'r') as f:
+                    token_data = json.load(f)
+                    access_token = token_data.get('access_token')
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'trakt-api-version': '2',
+                'trakt-api-key': trakt_main.CLIENT_ID,
+            }
+            if access_token:
+                headers['Authorization'] = f'Bearer {access_token}'
+            
+            all_items = []
+            page = 1
+            
+            while True:
+                url = f'https://api.trakt.tv/users/{username}/history'
+                params = {
+                    'page': page,
+                    'limit': 100,
+                    'extended': 'full'
+                }
+                
+                if start_at and page == 1:
+                    # For incremental updates
+                    params['start_at'] = start_at.isoformat()
+                
+                response = requests.get(url, headers=headers, params=params, timeout=60)
+                
+                if response.status_code == 404:
+                    raise SystemExit(f'User {username} not found or watch history is private')
+                elif response.status_code != 200:
+                    raise SystemExit(f'API error {response.status_code}: {response.text}')
+                
+                items = response.json()
+                if not items:
+                    break
+                
+                all_items.extend(items)
+                
+                # Check pagination headers
+                if 'X-Pagination-Page-Count' in response.headers:
+                    total_pages = int(response.headers['X-Pagination-Page-Count'])
+                    if page >= total_pages:
+                        break
+                else:
+                    # No more pages
+                    break
+                
+                page += 1
+                print(f"  Fetched page {page-1}, {len(all_items)} items so far...")
+            
+            # Convert raw JSON to trakt.py objects (or just use raw data)
+            # For simplicity, we'll work with raw JSON since we process it anyway
+            history_objs = all_items
+            
         print("API call successful, processing results...")
         
         socket.setdefaulttimeout(old_timeout)  # Restore original timeout
@@ -147,146 +243,173 @@ def main():
     if history_objs is None:
         raise SystemExit('Trakt API returned None - check authentication token or API status')
     
-    # Fetch user ratings (one API call for all ratings)
+    # Fetch user ratings (one API call for all ratings) - only for primary user
     print("\n=== Fetching user ratings ===")
     user_ratings = {}
-    try:
-        ratings_objs = trakt_main.Trakt['sync/ratings'].get()
-        if ratings_objs:
-            for rating_item in ratings_objs:
-                item_type = None
-                trakt_id = None
-                rating_value = None
-                
-                # Determine type and extract ID based on the object type
-                obj_type_name = type(rating_item).__name__
-                
-                if obj_type_name == 'Movie':
-                    item_type = 'movie'
-                    # Try to get trakt ID using get_key method first
-                    if hasattr(rating_item, 'get_key'):
-                        try:
-                            trakt_id = rating_item.get_key('trakt')
-                        except:
-                            pass
+    if username == PRIMARY_USER:
+        try:
+            ratings_objs = trakt_main.Trakt['sync/ratings'].get()
+            if ratings_objs:
+                for rating_item in ratings_objs:
+                    item_type = None
+                    trakt_id = None
+                    rating_value = None
                     
-                    # Fallback to pk or id
-                    if not trakt_id:
-                        if hasattr(rating_item, 'pk'):
-                            pk_val = rating_item.pk
-                            # pk might be a tuple like ('trakt', 123) or ('imdb', 'tt123')
-                            if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
-                                trakt_id = pk_val[1]
-                        elif hasattr(rating_item, 'id'):
-                            trakt_id = rating_item.id
-                elif obj_type_name == 'Show':
-                    item_type = 'show'
-                    if hasattr(rating_item, 'get_key'):
-                        try:
-                            trakt_id = rating_item.get_key('trakt')
-                        except:
-                            pass
-                    if not trakt_id and hasattr(rating_item, 'pk'):
-                        pk_val = rating_item.pk
-                        if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
-                            trakt_id = pk_val[1]
-                    if not trakt_id and hasattr(rating_item, 'id'):
-                        trakt_id = rating_item.id
-                elif obj_type_name == 'Episode':
-                    item_type = 'episode'
-                    if hasattr(rating_item, 'get_key'):
-                        try:
-                            trakt_id = rating_item.get_key('trakt')
-                        except:
-                            pass
-                    if not trakt_id and hasattr(rating_item, 'pk'):
-                        pk_val = rating_item.pk
-                        if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
-                            trakt_id = pk_val[1]
-                    if not trakt_id and hasattr(rating_item, 'id'):
-                        trakt_id = rating_item.id
-                elif obj_type_name == 'Season':
-                    # For seasons, try to get the show ID
-                    item_type = 'show'
-                    if hasattr(rating_item, 'show') and rating_item.show:
-                        if hasattr(rating_item.show, 'get_key'):
+                    # Determine type and extract ID based on the object type
+                    obj_type_name = type(rating_item).__name__
+                    
+                    if obj_type_name == 'Movie':
+                        item_type = 'movie'
+                        # Try to get trakt ID using get_key method first
+                        if hasattr(rating_item, 'get_key'):
                             try:
-                                trakt_id = rating_item.show.get_key('trakt')
+                                trakt_id = rating_item.get_key('trakt')
                             except:
                                 pass
-                        if not trakt_id and hasattr(rating_item.show, 'pk'):
-                            pk_val = rating_item.show.pk
+                        
+                        # Fallback to pk or id
+                        if not trakt_id:
+                            if hasattr(rating_item, 'pk'):
+                                pk_val = rating_item.pk
+                                # pk might be a tuple like ('trakt', 123) or ('imdb', 'tt123')
+                                if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
+                                    trakt_id = pk_val[1]
+                            elif hasattr(rating_item, 'id'):
+                                trakt_id = rating_item.id
+                    elif obj_type_name == 'Show':
+                        item_type = 'show'
+                        if hasattr(rating_item, 'get_key'):
+                            try:
+                                trakt_id = rating_item.get_key('trakt')
+                            except:
+                                pass
+                        if not trakt_id and hasattr(rating_item, 'pk'):
+                            pk_val = rating_item.pk
                             if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
                                 trakt_id = pk_val[1]
-                        if not trakt_id and hasattr(rating_item.show, 'id'):
-                            trakt_id = rating_item.show.id
+                        if not trakt_id and hasattr(rating_item, 'id'):
+                            trakt_id = rating_item.id
+                    elif obj_type_name == 'Episode':
+                        item_type = 'episode'
+                        if hasattr(rating_item, 'get_key'):
+                            try:
+                                trakt_id = rating_item.get_key('trakt')
+                            except:
+                                pass
+                        if not trakt_id and hasattr(rating_item, 'pk'):
+                            pk_val = rating_item.pk
+                            if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
+                                trakt_id = pk_val[1]
+                        if not trakt_id and hasattr(rating_item, 'id'):
+                            trakt_id = rating_item.id
+                    elif obj_type_name == 'Season':
+                        # For seasons, try to get the show ID
+                        item_type = 'show'
+                        if hasattr(rating_item, 'show') and rating_item.show:
+                            if hasattr(rating_item.show, 'get_key'):
+                                try:
+                                    trakt_id = rating_item.show.get_key('trakt')
+                                except:
+                                    pass
+                            if not trakt_id and hasattr(rating_item.show, 'pk'):
+                                pk_val = rating_item.show.pk
+                                if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
+                                    trakt_id = pk_val[1]
+                            if not trakt_id and hasattr(rating_item.show, 'id'):
+                                trakt_id = rating_item.show.id
+                    
+                    # Extract rating value
+                    if hasattr(rating_item, 'rating'):
+                        rating_value = rating_item.rating
+                        # Convert Rating object to int - parse from string representation
+                        rating_str = str(rating_value)
+                        if '/' in rating_str:
+                            # Parse "8/10" or "<Rating 8/10 ...>" format
+                            try:
+                                # Extract the number before the /
+                                before_slash = rating_str.split('/')[0]
+                                # Get the last "word" (number) before the slash
+                                rating_value = int(before_slash.split()[-1])
+                            except (ValueError, IndexError):
+                                rating_value = None
+                        else:
+                            # Try direct conversion
+                            try:
+                                rating_value = int(rating_value)
+                            except (ValueError, TypeError):
+                                rating_value = None
+                    
+                    if item_type and trakt_id and rating_value:
+                        user_ratings[(item_type, trakt_id)] = int(rating_value)
                 
-                # Extract rating value
-                if hasattr(rating_item, 'rating'):
-                    rating_value = rating_item.rating
-                    # Convert Rating object to int - parse from string representation
-                    rating_str = str(rating_value)
-                    if '/' in rating_str:
-                        # Parse "8/10" or "<Rating 8/10 ...>" format
-                        try:
-                            # Extract the number before the /
-                            before_slash = rating_str.split('/')[0]
-                            # Get the last "word" (number) before the slash
-                            rating_value = int(before_slash.split()[-1])
-                        except (ValueError, IndexError):
-                            rating_value = None
-                    else:
-                        # Try direct conversion
-                        try:
-                            rating_value = int(rating_value)
-                        except (ValueError, TypeError):
-                            rating_value = None
-                
-                if item_type and trakt_id and rating_value:
-                    user_ratings[(item_type, trakt_id)] = int(rating_value)
-            
-            print(f"  Loaded {len(user_ratings)} user ratings")
-    except Exception as e:
-        print(f"  Warning: Could not fetch user ratings: {e}")
-        import traceback
-        traceback.print_exc()
+                print(f"  Loaded {len(user_ratings)} user ratings")
+        except Exception as e:
+            print(f"  Warning: Could not fetch user ratings: {e}")
+            import traceback
+            traceback.print_exc()
+    else:
+        print(f"  Skipping ratings for non-primary user {username}")
     
     history = []
     seen = 0
     print(f"\nProcessing history items...")
     for item in history_objs:
-        d = item.to_dict()
-        d['force_type'] = 'movie' if type(item).__name__ == 'Movie' else 'episode'
-        d['watched_at_iso'] = item.watched_at.isoformat() if getattr(item, 'watched_at', None) else None
-        
-        # Add user rating if available
-        trakt_id = None
-        if d['force_type'] == 'movie':
-            # For movies, the item itself IS the movie
-            if hasattr(item, 'get_key'):
-                try:
-                    trakt_id = item.get_key('trakt')
-                except:
-                    pass
-            if trakt_id and ('movie', trakt_id) in user_ratings:
-                d['user_rating'] = user_ratings[('movie', trakt_id)]
-        elif d['force_type'] == 'episode':
-            # For episodes, try episode-level rating first
-            if hasattr(item, 'episode') and item.episode and hasattr(item.episode, 'get_key'):
-                try:
-                    trakt_id = item.episode.get_key('trakt')
-                except:
-                    pass
-            if trakt_id and ('episode', trakt_id) in user_ratings:
-                d['user_rating'] = user_ratings[('episode', trakt_id)]
-            # Also check for show-level rating as fallback
-            if 'user_rating' not in d and hasattr(item, 'show') and item.show and hasattr(item.show, 'get_key'):
-                try:
-                    show_trakt_id = item.show.get_key('trakt')
-                    if show_trakt_id and ('show', show_trakt_id) in user_ratings:
-                        d['user_rating'] = user_ratings[('show', show_trakt_id)]
-                except:
-                    pass
+        # Handle both trakt.py objects and raw JSON
+        if isinstance(item, dict):
+            # Raw JSON from public user history endpoint
+            d = item
+            # Determine type from the structure
+            if 'movie' in d:
+                d['force_type'] = 'movie'
+                # Normalize: extract movie IDs to top level for cast fetching
+                if 'movie' in d and isinstance(d['movie'], dict):
+                    if 'ids' not in d and 'ids' in d['movie']:
+                        d['ids'] = d['movie']['ids']
+            elif 'episode' in d:
+                d['force_type'] = 'episode'
+            else:
+                continue  # Skip unknown types
+            
+            # Extract watched_at timestamp
+            if 'watched_at' in d:
+                d['watched_at_iso'] = d['watched_at']
+            
+            # For non-primary users, we don't fetch ratings (would need their auth)
+            # They can set up their own instance if they want ratings
+        else:
+            # trakt.py object from sync/history (primary user)
+            d = item.to_dict()
+            d['force_type'] = 'movie' if type(item).__name__ == 'Movie' else 'episode'
+            d['watched_at_iso'] = item.watched_at.isoformat() if getattr(item, 'watched_at', None) else None
+            
+            # Add user rating if available
+            trakt_id = None
+            if d['force_type'] == 'movie':
+                # For movies, the item itself IS the movie
+                if hasattr(item, 'get_key'):
+                    try:
+                        trakt_id = item.get_key('trakt')
+                    except:
+                        pass
+                if trakt_id and ('movie', trakt_id) in user_ratings:
+                    d['user_rating'] = user_ratings[('movie', trakt_id)]
+            elif d['force_type'] == 'episode':
+                # For episodes, try episode-level rating first
+                if hasattr(item, 'episode') and item.episode and hasattr(item.episode, 'get_key'):
+                    try:
+                        trakt_id = item.episode.get_key('trakt')
+                    except:
+                        pass
+                if trakt_id and ('episode', trakt_id) in user_ratings:
+                    d['user_rating'] = user_ratings[('episode', trakt_id)]
+                # Also check for show-level rating as fallback
+                if 'user_rating' not in d and hasattr(item, 'show') and item.show and hasattr(item.show, 'get_key'):
+                    try:
+                        show_trakt_id = item.show.get_key('trakt')
+                        if show_trakt_id and ('show', show_trakt_id) in user_ratings:
+                            d['user_rating'] = user_ratings[('show', show_trakt_id)]
+                    except:
+                        pass
         
         if d['force_type'] == 'episode':
             d['extracted_show_title'] = item.show.title if hasattr(item, 'show') and item.show else None

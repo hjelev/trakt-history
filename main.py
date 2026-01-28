@@ -2,6 +2,7 @@
 """
 Minimal Trakt API wrapper for authentication and basic access.
 This file is imported by update_trakt_local.py script.
+Uses single authentication to fetch watch history for multiple users.
 """
 import os
 import json

@@ -14,25 +14,50 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 APP = Flask(__name__, template_folder='templates')
 APP.secret_key = os.getenv('FLASK_SECRET', 'dev-secret')
 
-DATA_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data', 'trakt_history.json'))
-GEN_SCRIPT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'scripts', 'generate_trakt_data.py'))
-MAIN_PY = os.path.abspath(os.path.join(os.path.dirname(__file__), 'main.py'))
+# Multi-user configuration
+PRIMARY_USER = os.getenv('PRIMARY_USER')
+if not PRIMARY_USER:
+    raise ValueError("PRIMARY_USER must be set in .env file")
+ADDITIONAL_USERS_STR = os.getenv('ADDITIONAL_USERS', '')
+ADDITIONAL_USERS = [u.strip() for u in ADDITIONAL_USERS_STR.split(',') if u.strip()]
+ALL_USERS = [PRIMARY_USER] + ADDITIONAL_USERS
+
+DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data'))
 CACHE_DURATION = int(os.getenv('CACHE_DURATION', 3600))
 
-RAW_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data', 'trakt_raw.json'))
-CACHE_DURATION = int(os.getenv('CACHE_DURATION', 3600))
+
+def get_user_data_path(username: str = None):
+    """Get the data path for a given user. If username is None, uses primary user."""
+    if username is None or username == PRIMARY_USER:
+        # Primary user uses default path for backward compatibility
+        return os.path.join(DATA_DIR, 'trakt_history.json')
+    return os.path.join(DATA_DIR, f'trakt_history_{username}.json')
 
 
-def load_data():
-    if not os.path.exists(DATA_PATH):
+def get_user_raw_path(username: str = None):
+    """Get the raw cache path for a given user."""
+    if username is None or username == PRIMARY_USER:
+        return os.path.join(DATA_DIR, 'trakt_raw.json')
+    return os.path.join(DATA_DIR, f'trakt_raw_{username}.json')
+
+
+def load_data(username: str = None):
+    """Load history data for specified user (or primary user if None)."""
+    data_path = get_user_data_path(username)
+    if not os.path.exists(data_path):
         return {'generated_at': None, 'count': 0, 'items': []}
-    with open(DATA_PATH, 'r') as f:
+    with open(data_path, 'r') as f:
         return json.load(f)
 
 
 @APP.route('/')
 def index():
-    data = load_data()
+    # Get selected user (default to primary user)
+    selected_user = request.args.get('user', PRIMARY_USER)
+    if selected_user not in ALL_USERS:
+        selected_user = PRIMARY_USER
+    
+    data = load_data(selected_user)
     # pagination params
     try:
         page = max(1, int(request.args.get('page', 1)))
@@ -283,22 +308,30 @@ def index():
     ratings = [it.get('rating') for it in all_items if it.get('rating') is not None]
     stats['avg_rating'] = round(sum(ratings) / len(ratings), 1) if ratings else None
     
-    return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats)
+    return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats,
+                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER)
 
 
 @APP.route('/api/history')
 def api_history():
-    data = load_data()
+    selected_user = request.args.get('user', PRIMARY_USER)
+    if selected_user not in ALL_USERS:
+        selected_user = PRIMARY_USER
+    data = load_data(selected_user)
     return jsonify(data)
 
 
 @APP.route('/raw')
 def raw():
     """Return the raw cached Trakt response (first item) for debugging."""
-    if not os.path.exists(RAW_PATH):
-        return jsonify({'error': 'raw cache not found', 'path': RAW_PATH}), 404
+    selected_user = request.args.get('user', PRIMARY_USER)
+    if selected_user not in ALL_USERS:
+        selected_user = PRIMARY_USER
+    raw_path = get_user_raw_path(selected_user)
+    if not os.path.exists(raw_path):
+        return jsonify({'error': 'raw cache not found', 'path': raw_path}), 404
     try:
-        with open(RAW_PATH, 'r') as f:
+        with open(raw_path, 'r') as f:
             raw = json.load(f)
         # return first item and total count for quick inspection
         return jsonify({'count': len(raw), 'first': raw[0] if raw else None})
@@ -308,44 +341,51 @@ def raw():
 
 @APP.route('/refresh')
 def refresh():
+    # Get selected user (default to primary user)
+    selected_user = request.args.get('user', PRIMARY_USER)
+    if selected_user not in ALL_USERS:
+        selected_user = PRIMARY_USER
+    
     # Prefer running the centralized updater script to ensure consistent
     # season-resolution and normalization. This keeps resolver logic in one place.
     updater = os.path.join(os.path.dirname(__file__), 'scripts', 'update_trakt_local.py')
     if not os.path.exists(updater):
         flash('Updater script not found: scripts/update_trakt_local.py', 'error')
-        return redirect(url_for('index'))
+        return redirect(url_for('index', user=selected_user))
 
-    # Only run the updater if the generated data is older than CACHE_DURATION
+    # Check data freshness
+    data_path = get_user_data_path(selected_user)
     try:
-        if os.path.exists(DATA_PATH):
-            mtime = os.path.getmtime(DATA_PATH)
+        if os.path.exists(data_path):
+            mtime = os.path.getmtime(data_path)
             age = time.time() - mtime
             if age < CACHE_DURATION:
                 flash(f'Data is fresh (updated {int(age)}s ago). Skipping refresh.', 'success')
-                return redirect(url_for('index'))
+                return redirect(url_for('index', user=selected_user))
 
-        # Run the updater with --no-cast and --no-enrichment for faster web refreshes
+        # Run the updater for this user with --no-cast and --no-enrichment for faster web refreshes
         # Cast fetching and show enrichment require many API calls and can take 5-10+ minutes
-        # Users can run manually with full data: python3 scripts/update_trakt_local.py
+        # Users can run manually with full data: python3 scripts/update_trakt_local.py --user <username>
         # Increase timeout to 15 minutes for very slow connections
+        cmd = ['python3', updater, '--user', selected_user]
         proc = subprocess.run(
-            ['python3', updater], 
+            cmd,
             cwd=os.path.dirname(__file__), 
             capture_output=True, 
             text=True, 
             timeout=900
         )
         if proc.returncode == 0:
-            flash('Refresh completed successfully', 'success')
+            flash(f'Refresh completed successfully for {selected_user}', 'success')
         else:
             msg = proc.stderr.strip() or proc.stdout.strip() or f'return code {proc.returncode}'
             flash(f'Refresh failed: {msg[:1000]}', 'error')
     except subprocess.TimeoutExpired:
-        flash('Refresh timed out after 15 minutes. Try running manually: python3 scripts/update_trakt_local.py --no-cast --no-enrichment', 'error')
+        flash('Refresh timed out after 15 minutes. Try running manually: python3 scripts/update_trakt_local.py --user <username>', 'error')
     except Exception as e:
         flash(f'Failed to run updater: {e}', 'error')
 
-    return redirect(url_for('index'))
+    return redirect(url_for('index', user=selected_user))
 
 
 if __name__ == '__main__':
