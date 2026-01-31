@@ -16,6 +16,9 @@ TOKEN_FILE = 'trakt.json'
 CLIENT_ID = os.getenv('TRAKT_CLIENT_ID')
 CLIENT_SECRET = os.getenv('TRAKT_CLIENT_SECRET')
 
+# Export Trakt and CLIENT_ID for use by update_trakt_local.py
+__all__ = ['Trakt', 'CLIENT_ID', 'authenticate']
+
 
 def authenticate():
     """

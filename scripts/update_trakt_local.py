@@ -152,15 +152,65 @@ def main():
         # For other users, use users/{id}/history (public endpoint)
         if username == PRIMARY_USER:
             # Use authenticated sync endpoint for primary user
-            if start_at:
-                history_objs = trakt_main.Trakt['sync/history'].get(
-                    pagination=True, 
-                    per_page=100, 
-                    extended='full',
-                    start_at=start_at
-                )
-            else:
-                history_objs = trakt_main.Trakt['sync/history'].get(pagination=True, per_page=100, extended='full')
+            # Use direct HTTP API calls instead of trakt.py library to avoid None returns
+            
+            # Get access token from the token file
+            token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
+            access_token = None
+            if os.path.exists(token_file_path):
+                with open(token_file_path, 'r') as f:
+                    token_data = json.load(f)
+                    access_token = token_data.get('access_token')
+            
+            headers = {
+                'Content-Type': 'application/json',
+                'trakt-api-version': '2',
+                'trakt-api-key': trakt_main.CLIENT_ID,
+            }
+            if access_token:
+                headers['Authorization'] = f'Bearer {access_token}'
+            
+            all_items = []
+            page = 1
+            
+            while True:
+                url = 'https://api.trakt.tv/sync/history'
+                params = {
+                    'page': page,
+                    'limit': 100,
+                    'extended': 'full'
+                }
+                
+                if start_at and page == 1:
+                    # For incremental updates
+                    params['start_at'] = start_at.isoformat()
+                
+                response = requests.get(url, headers=headers, params=params, timeout=60)
+                
+                if response.status_code == 401:
+                    raise SystemExit(f'Authentication failed for primary user - check token in trakt.json')
+                elif response.status_code != 200:
+                    raise SystemExit(f'API error {response.status_code}: {response.text}')
+                
+                items = response.json()
+                if not items:
+                    break
+                
+                all_items.extend(items)
+                
+                # Check pagination headers
+                if 'X-Pagination-Page-Count' in response.headers:
+                    total_pages = int(response.headers['X-Pagination-Page-Count'])
+                    if page >= total_pages:
+                        break
+                else:
+                    # No more pages
+                    break
+                
+                page += 1
+                print(f"  Fetched page {page-1}, {len(all_items)} items so far...")
+            
+            history_objs = all_items
         else:
             # Use public user history endpoint for other users
             # trakt.py doesn't support dynamic user IDs, so we'll use direct HTTP
@@ -240,8 +290,9 @@ def main():
         traceback.print_exc()
         raise SystemExit(f'Failed to fetch history: {e}')
     
-    if history_objs is None:
-        raise SystemExit('Trakt API returned None - check authentication token or API status')
+    if history_objs is None or (isinstance(history_objs, list) and len(history_objs) == 0):
+        print("WARNING: No items fetched from Trakt API")
+        history_objs = []
     
     # Fetch user ratings (one API call for all ratings) - only for primary user
     print("\n=== Fetching user ratings ===")
