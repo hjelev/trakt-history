@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import sys
 import json
 import subprocess
 import importlib.util
@@ -307,9 +308,14 @@ def index():
     # Average rating
     ratings = [it.get('rating') for it in all_items if it.get('rating') is not None]
     stats['avg_rating'] = round(sum(ratings) / len(ratings), 1) if ratings else None
+    stats['rated_count'] = len(ratings)
+
+    ratings_note = None
+    if selected_user != PRIMARY_USER:
+        ratings_note = f"Ratings are only available for primary user ({PRIMARY_USER})."
     
     return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats,
-                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER)
+                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, ratings_note=ratings_note)
 
 
 @APP.route('/api/history')
@@ -367,7 +373,11 @@ def refresh():
         # Cast fetching and show enrichment require many API calls and can take 5-10+ minutes
         # Users can run manually with full data: python3 scripts/update_trakt_local.py --user <username>
         # Increase timeout to 15 minutes for very slow connections
-        cmd = ['python3', updater, '--user', selected_user]
+        venv_python = os.path.join(os.path.dirname(__file__), '.venv', 'bin', 'python')
+        python_exec = sys.executable
+        if not python_exec or not os.path.exists(python_exec):
+            python_exec = venv_python if os.path.exists(venv_python) else 'python3'
+        cmd = [python_exec, updater, '--user', selected_user]
         proc = subprocess.run(
             cmd,
             cwd=os.path.dirname(__file__), 

@@ -440,6 +440,16 @@
         <div class="col-md-3">
           <a href="{{ url_for('refresh', user=selected_user) }}" class="text-decoration-none">🔄 Refresh now</a>
         </div>
+        {% if stats.rated_count is not none %}
+        <div class="col-md-3">
+          <strong>⭐ Rated Items:</strong> {{ stats.rated_count }}
+        </div>
+        {% endif %}
+        {% if ratings_note %}
+        <div class="col-md-9">
+          <strong>ℹ️ Ratings:</strong> {{ ratings_note }}
+        </div>
+        {% endif %}
       </div>
     </div>
     {% endif %}

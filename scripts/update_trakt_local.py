@@ -398,6 +398,81 @@ def main():
             print(f"  Warning: Could not fetch user ratings: {e}")
             import traceback
             traceback.print_exc()
+
+        # Fallback to direct HTTP if trakt.py returned nothing
+        if not user_ratings:
+            try:
+                print("  Falling back to direct Trakt ratings API...")
+                token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
+                access_token = None
+                if os.path.exists(token_file_path):
+                    with open(token_file_path, 'r') as f:
+                        token_data = json.load(f)
+                        access_token = token_data.get('access_token')
+
+                headers = {
+                    'Content-Type': 'application/json',
+                    'trakt-api-version': '2',
+                    'trakt-api-key': trakt_main.CLIENT_ID,
+                }
+                if access_token:
+                    headers['Authorization'] = f'Bearer {access_token}'
+
+                all_ratings = []
+                page = 1
+                while True:
+                    url = 'https://api.trakt.tv/sync/ratings'
+                    params = {
+                        'page': page,
+                        'limit': 100,
+                        'extended': 'full'
+                    }
+                    response = requests.get(url, headers=headers, params=params, timeout=30)
+                    if response.status_code == 401:
+                        raise SystemExit('Authentication failed for ratings - check token in trakt.json')
+                    if response.status_code != 200:
+                        raise SystemExit(f'Ratings API error {response.status_code}: {response.text}')
+
+                    items = response.json()
+                    if not items:
+                        break
+                    all_ratings.extend(items)
+
+                    if 'X-Pagination-Page-Count' in response.headers:
+                        total_pages = int(response.headers['X-Pagination-Page-Count'])
+                        if page >= total_pages:
+                            break
+                    else:
+                        break
+
+                    page += 1
+
+                for r in all_ratings:
+                    item_type = r.get('type')
+                    rating_value = r.get('rating')
+                    if not item_type or rating_value is None:
+                        continue
+
+                    if item_type == 'movie':
+                        trakt_id = (r.get('movie') or {}).get('ids', {}).get('trakt')
+                    elif item_type == 'show':
+                        trakt_id = (r.get('show') or {}).get('ids', {}).get('trakt')
+                    elif item_type == 'episode':
+                        trakt_id = (r.get('episode') or {}).get('ids', {}).get('trakt')
+                    else:
+                        trakt_id = None
+
+                    if trakt_id:
+                        try:
+                            user_ratings[(item_type, trakt_id)] = int(rating_value)
+                        except (ValueError, TypeError):
+                            pass
+
+                print(f"  Loaded {len(user_ratings)} user ratings (HTTP)")
+            except Exception as e:
+                print(f"  Warning: Could not fetch user ratings via HTTP: {e}")
+                import traceback
+                traceback.print_exc()
     else:
         print(f"  Skipping ratings for non-primary user {username}")
     
@@ -427,6 +502,22 @@ def main():
             
             # For non-primary users, we don't fetch ratings (would need their auth)
             # They can set up their own instance if they want ratings
+            if username == PRIMARY_USER and user_ratings:
+                if d.get('force_type') == 'movie':
+                    m = d.get('movie') or {}
+                    trakt_id = (m.get('ids') or {}).get('trakt') or (d.get('ids') or {}).get('trakt')
+                    if trakt_id and ('movie', trakt_id) in user_ratings:
+                        d['user_rating'] = user_ratings[('movie', trakt_id)]
+                elif d.get('force_type') == 'episode':
+                    ep = d.get('episode') or {}
+                    trakt_id = (ep.get('ids') or {}).get('trakt') or (d.get('ids') or {}).get('trakt')
+                    if trakt_id and ('episode', trakt_id) in user_ratings:
+                        d['user_rating'] = user_ratings[('episode', trakt_id)]
+                    if 'user_rating' not in d:
+                        show = d.get('show') or {}
+                        show_trakt_id = (show.get('ids') or {}).get('trakt')
+                        if show_trakt_id and ('show', show_trakt_id) in user_ratings:
+                            d['user_rating'] = user_ratings[('show', show_trakt_id)]
         else:
             # trakt.py object from sync/history (primary user)
             d = item.to_dict()
@@ -537,8 +628,54 @@ def main():
     # Exit early if no new items - cache is already up to date
     if start_at and len(deduped) == len(cached_items):
         print('\nNo new items found since last update.')
-        print('Cache is already up to date. Use --force to reprocess anyway.')
-        return
+        print('Cache is already up to date for history; will still refresh ratings cache.')
+
+    def _raw_item_type(it):
+        if it.get('force_type') in ('movie', 'episode'):
+            return it.get('force_type')
+        if 'movie' in it:
+            return 'movie'
+        if 'episode' in it:
+            return 'episode'
+        return None
+
+    def _raw_item_ids(it, item_type):
+        if item_type == 'movie':
+            m = it.get('movie') or it
+            ids = m.get('ids') if isinstance(m, dict) else None
+        else:
+            ep = it.get('episode') or it
+            ids = ep.get('ids') if isinstance(ep, dict) else None
+        return ids or it.get('ids') or {}
+
+    # Build episode->show mapping from all raw items so cached items can be updated each refresh
+    episode_to_show = {}
+    if username == PRIMARY_USER:
+        for it in deduped:
+            if _raw_item_type(it) != 'episode':
+                continue
+            ep_ids = _raw_item_ids(it, 'episode')
+            ep_trakt_id = (ep_ids or {}).get('trakt')
+            show = it.get('show') or {}
+            show_trakt_id = (show.get('ids') or {}).get('trakt') if isinstance(show, dict) else None
+            if ep_trakt_id and show_trakt_id:
+                episode_to_show[ep_trakt_id] = show_trakt_id
+
+    def _apply_rating_to_item(item):
+        if username != PRIMARY_USER or not user_ratings:
+            return
+        item_type = item.get('type')
+        trakt_id = (item.get('ids') or {}).get('trakt')
+        if item_type == 'movie' and trakt_id:
+            if ('movie', trakt_id) in user_ratings:
+                item['rating'] = user_ratings.get(('movie', trakt_id))
+        elif item_type == 'episode' and trakt_id:
+            if ('episode', trakt_id) in user_ratings:
+                item['rating'] = user_ratings.get(('episode', trakt_id))
+            else:
+                show_trakt_id = episode_to_show.get(trakt_id)
+                if show_trakt_id and ('show', show_trakt_id) in user_ratings:
+                    item['rating'] = user_ratings.get(('show', show_trakt_id))
 
     os.makedirs(os.path.dirname(RAW_PATH), exist_ok=True)
 
@@ -1175,6 +1312,9 @@ def main():
 
     # Normalize newly processed items
     simplified_new = [normalize(i) for i in history]
+    if username == PRIMARY_USER and user_ratings:
+        for item in simplified_new:
+            _apply_rating_to_item(item)
     
     # Load previously processed items from output cache if available
     simplified = simplified_new
@@ -1208,6 +1348,8 @@ def main():
                     key = (cached_item.get('type'), key_id, watched_day)
                     
                     if key not in new_item_keys:
+                        if username == PRIMARY_USER and user_ratings:
+                            _apply_rating_to_item(cached_item)
                         simplified.append(cached_item)
                 
                 print(f"  Total items after merge: {len(simplified)} ({len(simplified_new)} new + {len(simplified) - len(simplified_new)} cached)")
@@ -1216,6 +1358,11 @@ def main():
                 print(f"  Using only newly processed items")
                 simplified = simplified_new
     
+    # Refresh ratings on all processed items (new + cached) every run
+    if username == PRIMARY_USER and user_ratings:
+        for item in simplified:
+            _apply_rating_to_item(item)
+
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     
     end_time = datetime.now()
