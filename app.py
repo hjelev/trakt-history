@@ -9,8 +9,11 @@ from datetime import datetime, timedelta
 from flask import Flask, render_template, jsonify, redirect, url_for, flash, request
 from math import ceil
 from dotenv import load_dotenv
+from urllib.parse import quote
 
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
+
+from urllib.parse import unquote
 
 APP = Flask(__name__, template_folder='templates')
 APP.secret_key = os.getenv('FLASK_SECRET', 'dev-secret')
@@ -25,6 +28,44 @@ ALL_USERS = [PRIMARY_USER] + ADDITIONAL_USERS
 
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data'))
 CACHE_DURATION = int(os.getenv('CACHE_DURATION', 3600))
+
+
+@APP.template_filter('clean_url')
+def clean_url_filter(endpoint, **kwargs):
+    """Build path-based URLs like /genre/action/actor/Tom instead of ?genre=action&actor=Tom"""
+    # Build path segments from parameters
+    segments = []
+    
+    # Order matters for clean URLs - define the order we want
+    param_order = ['view', 'user', 'genre', 'actor', 'search', 'media', 'period', 'year', 'rated', 'page', 'per_page']
+    
+    # Defaults to skip
+    defaults = {
+        'page': 1,
+        'per_page': 10,
+        'media': 'both',
+        'period': 'all',
+        'view': 'gallery',
+        'user': PRIMARY_USER
+    }
+    
+    for param in param_order:
+        if param not in kwargs:
+            continue
+        value = kwargs[param]
+        # Skip empty, None, or default values
+        if value is None or value == '' or (param in defaults and value == defaults[param]):
+            continue
+        # URL encode the value and add as path segment: param/value
+        encoded_value = quote(str(value), safe='')
+        segments.append(f"{param}/{encoded_value}")
+    
+    if segments:
+        return '/' + '/'.join(segments)
+    return '/'
+
+
+APP.jinja_env.globals['clean_url'] = clean_url_filter
 
 
 def get_user_data_path(username: str = None):
@@ -52,61 +93,85 @@ def load_data(username: str = None):
 
 
 @APP.route('/')
-def index():
+@APP.route('/<path:params>')
+def index(params=None):
+    # Parse path-based parameters like /genre/action/actor/Tom
+    args = {}
+    
+    if params:
+        parts = params.split('/')
+        # Parse pairs: param/value
+        for i in range(0, len(parts) - 1, 2):
+            if i + 1 < len(parts):
+                key = parts[i]
+                value = unquote(parts[i + 1])  # URL decode the value
+                args[key] = value
+    
+    # Merge with query string args (fallback for old URLs)
+    for key in request.args:
+        if key not in args:
+            args[key] = request.args.get(key)
+    
     # Get selected user (default to primary user)
-    selected_user = request.args.get('user', PRIMARY_USER)
+    selected_user = args.get('user', PRIMARY_USER)
     if selected_user not in ALL_USERS:
         selected_user = PRIMARY_USER
     
     data = load_data(selected_user)
     # pagination params
     try:
-        page = max(1, int(request.args.get('page', 1)))
+        page = max(1, int(args.get('page', 1)))
     except Exception:
         page = 1
     try:
-        per_page = int(request.args.get('per_page', 10))
+        per_page = int(args.get('per_page', 10))
         if per_page <= 0:
             per_page = 10
     except Exception:
         per_page = 10
 
     # optional genre filter
-    genre = request.args.get('genre')
+    genre = args.get('genre')
     if genre:
         genre = genre.strip()
 
     # optional actor filter
-    actor = request.args.get('actor')
+    actor = args.get('actor')
     if actor:
         actor = actor.strip()
 
     # optional search filter
-    search = request.args.get('search')
+    search = args.get('search')
     if search:
         search = search.strip()
 
     # optional media filter: 'both' (default), 'movies', 'series'
-    media = request.args.get('media', 'both') or 'both'
+    media = args.get('media', 'both') or 'both'
     media = media.strip().lower()
     if media not in ('both', 'movies', 'series'):
         media = 'both'
 
     # optional time-period filter: 'all', 'week', 'month', 'year'
-    period = request.args.get('period', 'all') or 'all'
+    period = args.get('period', 'all') or 'all'
     period = period.strip().lower()
     if period not in ('all', 'week', 'month', 'year'):
         period = 'all'
 
     # optional release year filter
-    release_year = request.args.get('year', '') or ''
+    release_year = args.get('year', '') or ''
     release_year = release_year.strip()
 
     # optional rated only filter
-    rated_only = request.args.get('rated', '') or ''
+    rated_only = args.get('rated', '') or ''
     rated_only = rated_only.strip().lower()
     if rated_only not in ('yes', 'no', ''):
         rated_only = ''
+    
+    # optional view mode: 'gallery' (default) or 'calendar'
+    view_mode = args.get('view', 'gallery') or 'gallery'
+    view_mode = view_mode.strip().lower()
+    if view_mode not in ('gallery', 'calendar'):
+        view_mode = 'gallery'
 
     # Filter items by genre when requested (case-insensitive match)
     items_all = data.get('items', [])
@@ -237,6 +302,28 @@ def index():
         except Exception:
             return s
 
+    # For calendar mode, group items by date and paginate by date
+    calendar_items = None
+    if view_mode == 'calendar':
+        from collections import defaultdict
+        calendar_items_dict = defaultdict(list)
+        for it in items_all:
+            watched_date = (it.get('watched_at') or '').split(' ')[0] if it.get('watched_at') else 'Unknown'
+            calendar_items_dict[watched_date].append(it)
+        # Sort dates in reverse (most recent first)
+        sorted_dates = sorted(calendar_items_dict.keys(), reverse=True)
+        
+        # Paginate by date
+        total = len(sorted_dates)
+        total_pages = max(1, ceil(total / per_page))
+        if page > total_pages:
+            page = total_pages
+        start = (page - 1) * per_page
+        end = start + per_page
+        paginated_dates = sorted_dates[start:end]
+        
+        calendar_items = {date: calendar_items_dict[date] for date in paginated_dates}
+    
     paged = {
         'generated_at': _format_generated_at(data.get('generated_at')),
         'generation_time': data.get('generation_time'),
@@ -252,6 +339,8 @@ def index():
         'filter_period': period,
         'filter_year': release_year,
         'filter_rated': rated_only,
+        'view_mode': view_mode,
+        'calendar_items': calendar_items,
     }
 
     per_page_options = [10, 25, 50, 100]
@@ -315,7 +404,7 @@ def index():
         ratings_note = f"Ratings are only available for primary user ({PRIMARY_USER})."
     
     return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats,
-                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, ratings_note=ratings_note)
+                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, ratings_note=ratings_note, view_mode=view_mode)
 
 
 @APP.route('/api/history')

@@ -593,6 +593,15 @@ def main():
             trakt_id = None
         key_id = str(trakt_id) if trakt_id is not None else (it.get('title') or '')
 
+        # For episodes, include season and episode number to allow multiple episodes of same show on same day
+        episode_identifier = None
+        if it.get('force_type') == 'episode':
+            episode_data = it.get('episode', {})
+            season = episode_data.get('season')
+            number = episode_data.get('number')
+            if season is not None and number is not None:
+                episode_identifier = f"S{season}E{number}"
+
         # Normalize watched timestamp to calendar day (YYYY-MM-DD) for dedupe keys.
         watched_raw = it.get('watched_at_iso') or it.get('watched_at') or it.get('watched_at_str')
         watched_day = None
@@ -615,7 +624,7 @@ def main():
                 except Exception:
                     watched_day = None
 
-        key = (it.get('force_type'), key_id, watched_day)
+        key = (it.get('force_type'), key_id, episode_identifier, watched_day)
         if key in seen_keys:
             if args.verbose:
                 print(f'duplicate skipped: {key}')
