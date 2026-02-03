@@ -43,10 +43,20 @@ def run_update_for_user(username):
             UPDATE_SCRIPT,
             '--user', username
         ]
+        # For primary user, force refresh to ensure ratings are always pulled fresh
+        # For other users, use incremental mode (respects cache for faster updates)
+        if username == PRIMARY_USER:
+            cmd.append('--force')
+        
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
         
         if result.returncode == 0:
             logger.info(f"✓ Update completed for {username}")
+            # Log output for debugging
+            if result.stdout:
+                for line in result.stdout.split('\n')[-5:]:  # Last 5 lines
+                    if line.strip():
+                        logger.debug(f"  {line}")
         else:
             logger.error(f"✗ Update failed for {username}: {result.stderr}")
     except subprocess.TimeoutExpired:

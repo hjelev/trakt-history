@@ -474,7 +474,9 @@ def refresh():
         python_exec = sys.executable
         if not python_exec or not os.path.exists(python_exec):
             python_exec = venv_python if os.path.exists(venv_python) else 'python3'
-        cmd = [python_exec, updater, '--user', selected_user]
+        cmd = [python_exec, updater, '--user', selected_user, '--force']
+        # Force refresh ensures ratings are always pulled fresh
+        # This adds a small overhead but ensures rating updates are never missed
         proc = subprocess.run(
             cmd,
             cwd=os.path.dirname(__file__), 

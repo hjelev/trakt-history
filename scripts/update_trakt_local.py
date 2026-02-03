@@ -298,181 +298,79 @@ def main():
     print("\n=== Fetching user ratings ===")
     user_ratings = {}
     if username == PRIMARY_USER:
+        # Always fetch ratings via HTTP API for reliability
         try:
-            ratings_objs = trakt_main.Trakt['sync/ratings'].get()
-            if ratings_objs:
-                for rating_item in ratings_objs:
-                    item_type = None
+            print("  Fetching ratings via direct Trakt API...")
+            token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
+            access_token = None
+            if os.path.exists(token_file_path):
+                with open(token_file_path, 'r') as f:
+                    token_data = json.load(f)
+                    access_token = token_data.get('access_token')
+
+            headers = {
+                'Content-Type': 'application/json',
+                'trakt-api-version': '2',
+                'trakt-api-key': trakt_main.CLIENT_ID,
+            }
+            if access_token:
+                headers['Authorization'] = f'Bearer {access_token}'
+
+            all_ratings = []
+            page = 1
+            while True:
+                url = 'https://api.trakt.tv/sync/ratings'
+                params = {
+                    'page': page,
+                    'limit': 100,
+                    'extended': 'full'
+                }
+                response = requests.get(url, headers=headers, params=params, timeout=30)
+                if response.status_code == 401:
+                    raise SystemExit('Authentication failed for ratings - check token in trakt.json')
+                if response.status_code != 200:
+                    raise SystemExit(f'Ratings API error {response.status_code}: {response.text}')
+
+                items = response.json()
+                if not items:
+                    break
+                all_ratings.extend(items)
+
+                if 'X-Pagination-Page-Count' in response.headers:
+                    total_pages = int(response.headers['X-Pagination-Page-Count'])
+                    if page >= total_pages:
+                        break
+                else:
+                    break
+
+                page += 1
+
+            for r in all_ratings:
+                item_type = r.get('type')
+                rating_value = r.get('rating')
+                if not item_type or rating_value is None:
+                    continue
+
+                if item_type == 'movie':
+                    trakt_id = (r.get('movie') or {}).get('ids', {}).get('trakt')
+                elif item_type == 'show':
+                    trakt_id = (r.get('show') or {}).get('ids', {}).get('trakt')
+                elif item_type == 'episode':
+                    trakt_id = (r.get('episode') or {}).get('ids', {}).get('trakt')
+                else:
                     trakt_id = None
-                    rating_value = None
-                    
-                    # Determine type and extract ID based on the object type
-                    obj_type_name = type(rating_item).__name__
-                    
-                    if obj_type_name == 'Movie':
-                        item_type = 'movie'
-                        # Try to get trakt ID using get_key method first
-                        if hasattr(rating_item, 'get_key'):
-                            try:
-                                trakt_id = rating_item.get_key('trakt')
-                            except:
-                                pass
-                        
-                        # Fallback to pk or id
-                        if not trakt_id:
-                            if hasattr(rating_item, 'pk'):
-                                pk_val = rating_item.pk
-                                # pk might be a tuple like ('trakt', 123) or ('imdb', 'tt123')
-                                if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
-                                    trakt_id = pk_val[1]
-                            elif hasattr(rating_item, 'id'):
-                                trakt_id = rating_item.id
-                    elif obj_type_name == 'Show':
-                        item_type = 'show'
-                        if hasattr(rating_item, 'get_key'):
-                            try:
-                                trakt_id = rating_item.get_key('trakt')
-                            except:
-                                pass
-                        if not trakt_id and hasattr(rating_item, 'pk'):
-                            pk_val = rating_item.pk
-                            if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
-                                trakt_id = pk_val[1]
-                        if not trakt_id and hasattr(rating_item, 'id'):
-                            trakt_id = rating_item.id
-                    elif obj_type_name == 'Episode':
-                        item_type = 'episode'
-                        if hasattr(rating_item, 'get_key'):
-                            try:
-                                trakt_id = rating_item.get_key('trakt')
-                            except:
-                                pass
-                        if not trakt_id and hasattr(rating_item, 'pk'):
-                            pk_val = rating_item.pk
-                            if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
-                                trakt_id = pk_val[1]
-                        if not trakt_id and hasattr(rating_item, 'id'):
-                            trakt_id = rating_item.id
-                    elif obj_type_name == 'Season':
-                        # For seasons, try to get the show ID
-                        item_type = 'show'
-                        if hasattr(rating_item, 'show') and rating_item.show:
-                            if hasattr(rating_item.show, 'get_key'):
-                                try:
-                                    trakt_id = rating_item.show.get_key('trakt')
-                                except:
-                                    pass
-                            if not trakt_id and hasattr(rating_item.show, 'pk'):
-                                pk_val = rating_item.show.pk
-                                if isinstance(pk_val, tuple) and len(pk_val) >= 2 and pk_val[0] == 'trakt':
-                                    trakt_id = pk_val[1]
-                            if not trakt_id and hasattr(rating_item.show, 'id'):
-                                trakt_id = rating_item.show.id
-                    
-                    # Extract rating value
-                    if hasattr(rating_item, 'rating'):
-                        rating_value = rating_item.rating
-                        # Convert Rating object to int - parse from string representation
-                        rating_str = str(rating_value)
-                        if '/' in rating_str:
-                            # Parse "8/10" or "<Rating 8/10 ...>" format
-                            try:
-                                # Extract the number before the /
-                                before_slash = rating_str.split('/')[0]
-                                # Get the last "word" (number) before the slash
-                                rating_value = int(before_slash.split()[-1])
-                            except (ValueError, IndexError):
-                                rating_value = None
-                        else:
-                            # Try direct conversion
-                            try:
-                                rating_value = int(rating_value)
-                            except (ValueError, TypeError):
-                                rating_value = None
-                    
-                    if item_type and trakt_id and rating_value:
+
+                if trakt_id:
+                    try:
                         user_ratings[(item_type, trakt_id)] = int(rating_value)
-                
-                print(f"  Loaded {len(user_ratings)} user ratings")
+                    except (ValueError, TypeError):
+                        pass
+
+            print(f"  Loaded {len(user_ratings)} user ratings from API")
         except Exception as e:
-            print(f"  Warning: Could not fetch user ratings: {e}")
+            print(f"  Warning: Could not fetch user ratings via API: {e}")
             import traceback
             traceback.print_exc()
-
-        # Fallback to direct HTTP if trakt.py returned nothing
-        if not user_ratings:
-            try:
-                print("  Falling back to direct Trakt ratings API...")
-                token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
-                access_token = None
-                if os.path.exists(token_file_path):
-                    with open(token_file_path, 'r') as f:
-                        token_data = json.load(f)
-                        access_token = token_data.get('access_token')
-
-                headers = {
-                    'Content-Type': 'application/json',
-                    'trakt-api-version': '2',
-                    'trakt-api-key': trakt_main.CLIENT_ID,
-                }
-                if access_token:
-                    headers['Authorization'] = f'Bearer {access_token}'
-
-                all_ratings = []
-                page = 1
-                while True:
-                    url = 'https://api.trakt.tv/sync/ratings'
-                    params = {
-                        'page': page,
-                        'limit': 100,
-                        'extended': 'full'
-                    }
-                    response = requests.get(url, headers=headers, params=params, timeout=30)
-                    if response.status_code == 401:
-                        raise SystemExit('Authentication failed for ratings - check token in trakt.json')
-                    if response.status_code != 200:
-                        raise SystemExit(f'Ratings API error {response.status_code}: {response.text}')
-
-                    items = response.json()
-                    if not items:
-                        break
-                    all_ratings.extend(items)
-
-                    if 'X-Pagination-Page-Count' in response.headers:
-                        total_pages = int(response.headers['X-Pagination-Page-Count'])
-                        if page >= total_pages:
-                            break
-                    else:
-                        break
-
-                    page += 1
-
-                for r in all_ratings:
-                    item_type = r.get('type')
-                    rating_value = r.get('rating')
-                    if not item_type or rating_value is None:
-                        continue
-
-                    if item_type == 'movie':
-                        trakt_id = (r.get('movie') or {}).get('ids', {}).get('trakt')
-                    elif item_type == 'show':
-                        trakt_id = (r.get('show') or {}).get('ids', {}).get('trakt')
-                    elif item_type == 'episode':
-                        trakt_id = (r.get('episode') or {}).get('ids', {}).get('trakt')
-                    else:
-                        trakt_id = None
-
-                    if trakt_id:
-                        try:
-                            user_ratings[(item_type, trakt_id)] = int(rating_value)
-                        except (ValueError, TypeError):
-                            pass
-
-                print(f"  Loaded {len(user_ratings)} user ratings (HTTP)")
-            except Exception as e:
-                print(f"  Warning: Could not fetch user ratings via HTTP: {e}")
-                import traceback
-                traceback.print_exc()
     else:
         print(f"  Skipping ratings for non-primary user {username}")
     
@@ -1368,9 +1266,16 @@ def main():
                 simplified = simplified_new
     
     # Refresh ratings on all processed items (new + cached) every run
+    # Apply ratings twice to ensure they're picked up even if trakt ID lookup fails on first pass
     if username == PRIMARY_USER and user_ratings:
+        ratings_updated = 0
         for item in simplified:
+            old_rating = item.get('rating')
             _apply_rating_to_item(item)
+            if old_rating != item.get('rating'):
+                ratings_updated += 1
+        if ratings_updated > 0:
+            print(f"\n✓ Updated ratings on {ratings_updated} items during merge")
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     
