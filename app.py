@@ -18,6 +18,14 @@ from urllib.parse import unquote
 APP = Flask(__name__, template_folder='templates')
 APP.secret_key = os.getenv('FLASK_SECRET', 'dev-secret')
 
+# Import scheduler
+try:
+    from scheduler import start_scheduler, stop_scheduler
+    HAS_SCHEDULER = True
+except ImportError:
+    HAS_SCHEDULER = False
+    print("Warning: APScheduler not available. Background updates disabled.")
+
 # Multi-user configuration
 PRIMARY_USER = os.getenv('PRIMARY_USER')
 if not PRIMARY_USER:
@@ -488,4 +496,12 @@ def refresh():
 
 
 if __name__ == '__main__':
-    APP.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=os.getenv('FLASK_DEBUG', '1') == '1')
+    # Start background scheduler for automatic updates
+    if HAS_SCHEDULER:
+        start_scheduler()
+    
+    try:
+        APP.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=os.getenv('FLASK_DEBUG', '1') == '1')
+    finally:
+        if HAS_SCHEDULER:
+            stop_scheduler()
