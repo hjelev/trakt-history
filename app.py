@@ -56,6 +56,12 @@ def clean_url_filter(endpoint, **kwargs):
         'view': 'gallery',
         'user': PRIMARY_USER
     }
+
+    # If a non-primary user is selected, prefix the URL with /<username>
+    user_segment = None
+    user_value = kwargs.get('user')
+    if user_value and user_value != PRIMARY_USER:
+        user_segment = quote(str(user_value), safe='')
     
     for param in param_order:
         if param not in kwargs:
@@ -64,10 +70,17 @@ def clean_url_filter(endpoint, **kwargs):
         # Skip empty, None, or default values
         if value is None or value == '' or (param in defaults and value == defaults[param]):
             continue
+        # 'user' handled as leading segment
+        if param == 'user':
+            continue
         # URL encode the value and add as path segment: param/value
         encoded_value = quote(str(value), safe='')
         segments.append(f"{param}/{encoded_value}")
     
+    if user_segment and segments:
+        return '/' + user_segment + '/' + '/'.join(segments)
+    if user_segment and not segments:
+        return '/' + user_segment
     if segments:
         return '/' + '/'.join(segments)
     return '/'
@@ -108,6 +121,13 @@ def index(params=None):
     
     if params:
         parts = params.split('/')
+        known_keys = {'view', 'user', 'genre', 'actor', 'search', 'media', 'period', 'year', 'rated', 'page', 'per_page'}
+
+        # Support /<username> and /<username>/param/value
+        if parts and parts[0] in ALL_USERS and parts[0] not in known_keys:
+            args['user'] = parts[0]
+            parts = parts[1:]
+
         # Parse pairs: param/value
         for i in range(0, len(parts) - 1, 2):
             if i + 1 < len(parts):

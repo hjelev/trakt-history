@@ -147,22 +147,14 @@
             <a href="{{ clean_url('index', user=selected_user, view='calendar', page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="{% if view_mode == 'calendar' %}active{% endif %}" title="Calendar View">📅 Calendar</a>
           </div>
           {% if all_users|length > 1 %}
-          <form method="get" style="margin: 0; display: flex; gap: 8px; align-items: center;">
+          <div style="margin: 0; display: flex; gap: 8px; align-items: center;">
             <label for="user_select" class="form-label small mb-0" style="white-space: nowrap; font-weight: 600;">👤 View:</label>
-            <select id="user_select" name="user" class="form-select form-select-sm" style="width: auto; min-width: 140px;" onchange="this.form.submit()">
+            <select id="user_select" class="form-select form-select-sm" style="width: auto; min-width: 140px;" onchange="if (this.selectedOptions[0] && this.selectedOptions[0].dataset.url) window.location = this.selectedOptions[0].dataset.url;">
               {% for u in all_users %}
-                <option value="{{ u }}" {% if selected_user == u %}selected{% endif %}>{{ u }}</option>
+                <option value="{{ u }}" data-url="{{ clean_url('index', user=u, view=view_mode, page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" {% if selected_user == u %}selected{% endif %}>{{ u }}</option>
               {% endfor %}
             </select>
-            <input type="hidden" name="per_page" value="{{ data.per_page }}">
-            <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
-            <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
-            <input type="hidden" name="media" value="{{ data.filter_media or 'both' }}">
-            <input type="hidden" name="period" value="{{ data.filter_period or 'all' }}">
-            <input type="hidden" name="year" value="{{ data.filter_year or '' }}">
-            <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
-            <input type="hidden" name="view" value="{{ view_mode }}">
-          </form>
+          </div>
           {% endif %}
         </div>
       </div>
