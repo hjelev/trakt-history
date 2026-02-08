@@ -61,10 +61,9 @@ def run_update_for_user(username):
             UPDATE_SCRIPT,
             '--user', username
         ]
-        # For primary user, force refresh to ensure ratings are always pulled fresh
-        # For other users, use incremental mode (respects cache for faster updates)
-        if username == PRIMARY_USER:
-            cmd.append('--force')
+        # Use incremental mode for faster updates
+        # Ratings are always fetched fresh on every run (ratings API is fast)
+        # No need for --force flag which would do a full refresh and timeout
         
         logger.debug(f"Running command: {' '.join(cmd)}")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
