@@ -5,178 +5,233 @@
     <meta name="viewport" content="width=device-width,initial-scale=1">
     <title>{{ selected_user|capitalize }} Trakt History</title>
     <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%23e03a3a'/><polygon points='10,8 16,12 10,16' fill='%23fff'/></svg>">
-    <!-- Bootstrap 5 CSS (no SRI to avoid blocking if hash mismatches) -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-      body{font-family:system-ui,Arial;margin:24px}
-      .meta{margin-bottom:12px}
-      .flash-success{color:green}
-      .flash-error{color:red}
-      .imdb-rating{background:#f5c518;color:#000;font-weight:700;padding:0.25rem 0.5rem;border-radius:0.25rem}
-      .poster-thumb{width:100%;height:auto;border-radius:4px;display:block}
-      .cards{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start}
-      .card-media{flex:0 0 240px;max-width:240px;position:relative}
-      .card {width:240px !important;height:570px !important;display:flex;flex-direction:column;transition:transform .18s ease,box-shadow .18s ease}
-      .card:hover,.card:focus-within{transform:translateY(-6px);box-shadow:0 10px 24px rgba(0,0,0,0.18)}
-      .site-logo{width:28px;height:28px;margin-right:8px;display:inline-block}
-      .site-title-link{color:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:8px}
-      .card-body{padding:0.6rem;flex:1;display:flex;flex-direction:column}
-      .rating-badge{position:absolute;right:8px;top:8px;background:rgba(0,0,0,0.8);color:#fff;padding:0.18rem 0.4rem;border-radius:0.25rem;font-weight:700;font-size:0.9rem}
-      .listing-title{font-size:1rem;margin-bottom:0.25rem;line-height:1.1}
-      .listing-title a{color:inherit;text-decoration:none}
-      .listing-title a:hover{text-decoration:underline}
-      .listing-sub{color:#6c757d;font-size:0.85rem}
-      /* clamp title to 2 lines */
-      .clamp-2 {display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
-      .top-row .meta-controls .form-label.small {margin-bottom:0}
-      .meta-controls .form-select.form-select-sm {height: calc(1.5rem + 0.5rem); padding: .15rem .4rem; font-size: .85rem}
-      .meta-controls select#media_top, .meta-controls select#media {min-width: 110px}
-      .meta-controls select#period_top, .meta-controls select#period {min-width: 120px}
-      
-      /* Mobile responsive styles */
-      @media (max-width:720px) {
-        body { margin: 12px }
-        .top-row {flex-direction:column;align-items:stretch}
-        .meta-controls {margin-top:8px; flex-wrap: wrap}
+      /* === BASE === */
+      body { font-family: 'Inter', system-ui, Arial; margin: 0; padding: 0 24px 32px }
+
+      /* === STICKY HEADER === */
+      .site-header {
+        position: sticky; top: 0; z-index: 100;
+        background: rgba(255,255,255,0.92);
+        backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+        border-bottom: 1px solid rgba(0,0,0,0.07);
+        margin: 0 -24px; padding: 12px 24px; margin-bottom: 20px;
+      }
+      .site-header-inner { display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 10px }
+      .site-logo { width: 26px; height: 26px; display: inline-block }
+      .site-title-link { color: inherit; text-decoration: none; display: inline-flex; align-items: center; gap: 8px }
+      .site-title-text { font-size: 1.15rem; font-weight: 700; letter-spacing: -0.02em }
+      .site-header h1 { margin-bottom: 6px }
+
+      /* === FLASH MESSAGES === */
+      .flash-success { color: #16a34a }
+      .flash-error { color: #dc2626 }
+
+      /* === CARDS === */
+      .cards { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start }
+      .card-media { flex: 0 0 220px; max-width: 220px; position: relative; overflow: hidden }
+      .card {
+        width: 220px !important; height: auto !important;
+        display: flex; flex-direction: column;
+        border-radius: 10px !important; overflow: hidden;
+        transition: transform .18s ease, box-shadow .18s ease;
+      }
+      .card:hover, .card:focus-within { transform: translateY(-5px); box-shadow: 0 12px 28px rgba(0,0,0,0.22) }
+      .card-img-top { width: 100%; aspect-ratio: 2/3; object-fit: cover; display: block }
+      .card-media::after {
+        content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 70px;
+        background: linear-gradient(to bottom, transparent, rgba(0,0,0,0.55));
+        pointer-events: none;
+      }
+      .poster-placeholder { width: 100%; aspect-ratio: 2/3; background: rgba(0,0,0,0.1); border-radius: 4px }
+      .card-body { padding: 0.6rem; flex: 1; display: flex; flex-direction: column }
+      .rating-badge {
+        position: absolute; right: 8px; top: 8px;
+        background: rgba(0,0,0,0.78); color: #fff;
+        padding: 0.2rem 0.45rem; border-radius: 0.3rem;
+        font-weight: 700; font-size: 0.82rem; letter-spacing: 0.02em; z-index: 1;
+      }
+      .listing-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; line-height: 1.15 }
+      .listing-title a { color: inherit; text-decoration: none }
+      .listing-title a:hover { text-decoration: underline }
+      .listing-sub { color: #6c757d; font-size: 0.82rem; line-height: 1.4 }
+      .clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden }
+      .imdb-rating { background: #f5c518; color: #000; font-weight: 700; padding: 0.25rem 0.5rem; border-radius: 0.25rem }
+
+      /* === TAGS (actor/genre badges) === */
+      .tag {
+        display: inline-block; background: rgba(0,0,0,0.06); color: #444;
+        border: 1px solid rgba(0,0,0,0.1); border-radius: 100px;
+        padding: 0.1rem 0.45rem; font-size: 0.72rem; font-weight: 500;
+        text-decoration: none; transition: background .14s, color .14s, border-color .14s; margin: 1px;
+      }
+      .tag:hover { background: rgba(224,58,58,0.1); border-color: rgba(224,58,58,0.25); color: #c02020 }
+
+      /* === FILTER CHIPS === */
+      .filter-chip {
+        display: inline-flex; align-items: center; gap: 5px;
+        background: rgba(224,58,58,0.1); border: 1px solid rgba(224,58,58,0.25); color: #c02020;
+        border-radius: 100px; padding: 0.15rem 0.6rem; font-size: 0.8rem; font-weight: 500;
+      }
+      .filter-chip a { color: inherit; text-decoration: none; font-weight: 700; opacity: 0.6; margin-left: 2px }
+      .filter-chip a:hover { opacity: 1 }
+
+      /* === VIEW TOGGLE (segmented control) === */
+      .view-toggle { display: inline-flex; background: rgba(0,0,0,0.07); border-radius: 8px; padding: 3px; gap: 2px }
+      .view-toggle a {
+        border-radius: 6px; border: none; padding: 0.32rem 0.8rem;
+        font-size: 0.82rem; font-weight: 500; text-decoration: none; color: inherit;
+        transition: background .15s, color .15s;
+      }
+      .view-toggle a.active { background: #e03a3a; color: #fff !important }
+      .view-toggle a:hover:not(.active) { background: rgba(0,0,0,0.08) }
+
+      /* === CONTROLS ROW === */
+      .top-row .meta-controls .form-label.small { margin-bottom: 0 }
+      .meta-controls .form-select.form-select-sm { height: calc(1.5rem + 0.5rem); padding: .15rem .4rem; font-size: .82rem }
+      .meta-controls select#media_top, .meta-controls select#media { min-width: 110px }
+      .meta-controls select#period_top, .meta-controls select#period { min-width: 120px }
+
+      /* === CALENDAR VIEW === */
+      .gallery-container { display: grid; gap: 24px; margin-bottom: 24px }
+      .gallery-date-section { background: rgba(0,0,0,0.03); border-radius: 10px; padding: 16px; border: 1px solid rgba(0,0,0,0.08) }
+      .gallery-date-header { font-size: 1.05rem; font-weight: 700; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid rgba(0,0,0,0.1) }
+      .gallery-items { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-start }
+      .gallery-card { position: relative }
+      .gallery-card .card { width: 220px !important; display: flex; flex-direction: column }
+
+      /* === STATS SECTION === */
+      .stats-section { margin-top: 20px; padding: 18px 20px; background: rgba(0,0,0,0.02); border-radius: 12px; border: 1px solid rgba(0,0,0,0.08) }
+      .stats-section-title { font-size: 0.72rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.09em; opacity: 0.45; margin-bottom: 14px }
+      .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(148px, 1fr)); gap: 10px; margin-bottom: 14px }
+      .stat-card { background: rgba(0,0,0,0.03); border-radius: 10px; padding: 12px 14px; border: 1px solid rgba(0,0,0,0.06) }
+      .stat-icon { font-size: 1.1rem; margin-bottom: 3px }
+      .stat-value { font-size: 1.1rem; font-weight: 700; color: #e03a3a; line-height: 1.25 }
+      .stat-label { font-size: 0.68rem; color: #6c757d; margin-top: 2px; text-transform: uppercase; letter-spacing: 0.05em }
+      .stats-meta { display: flex; flex-wrap: wrap; gap: 16px; font-size: 0.78rem; opacity: 0.6; border-top: 1px solid rgba(0,0,0,0.07); padding-top: 12px; margin-top: 4px }
+
+      /* === MOBILE === */
+      @media (max-width: 720px) {
+        body { padding: 0 12px 12px }
+        .site-header { margin: 0 -12px; padding: 10px 12px; margin-bottom: 14px }
+        .site-header-inner { flex-direction: column; align-items: flex-start }
+        .site-header-inner form { width: 100% }
+        .top-row { flex-direction: column; align-items: stretch }
+        .meta-controls { margin-top: 8px; flex-wrap: wrap }
         .meta-controls form { flex-wrap: wrap; width: 100% }
-        .meta-controls .form-label { display: none } /* Hide labels on mobile */
+        .meta-controls .form-label { display: none }
         .meta-controls select { min-width: 80px !important; flex: 1 }
-        
-        /* Stack header elements */
-        .d-flex.justify-content-between { flex-direction: column; gap: 12px; align-items: flex-start !important }
-        .d-flex.justify-content-between h1 { font-size: 1.4rem }
-        .d-flex.justify-content-between form { width: 100%; max-width: 100% !important }
-        
-        /* Make cards responsive */
-        .cards { justify-content: center; gap: 16px }
-        .card, .card-media { width: 160px; flex: 0 0 160px; max-width: 160px }
-        .card-body { padding: 0.5rem }
-        .listing-title { font-size: 0.85rem }
-        .listing-sub { font-size: 0.75rem }
-        .rating-badge { font-size: 0.75rem; padding: 0.15rem 0.3rem }
-        
-        /* Better pagination on mobile */
-        .pagination { font-size: 0.85rem }
+        .cards { justify-content: center; gap: 12px }
+        .card, .card-media { width: 155px !important; flex: 0 0 155px; max-width: 155px }
+        .card-body { padding: 0.45rem }
+        .listing-title { font-size: 0.82rem }
+        .listing-sub { font-size: 0.72rem }
+        .rating-badge { font-size: 0.72rem; padding: 0.13rem 0.3rem }
+        .pagination { font-size: 0.82rem }
         .bottom-row, .top-row { gap: 8px }
         .bottom-row .meta-controls, .top-row .meta-controls { width: 100% }
-        
-        /* Stats section responsive */
-        .meta .row .col-md-3 { width: 100%; margin-bottom: 8px }
-        .meta { font-size: 0.85rem }
-        
-        /* Search bar mobile */
-        .d-flex.justify-content-between .btn { padding: 0.375rem 0.75rem; font-size: 0.9rem }
+        .stats-grid { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) }
+        .gallery-card .card { width: 155px !important }
       }
-      
-      /* Small mobile phones */
-      @media (max-width:400px) {
-        .card, .card-media { width: 140px; flex: 0 0 140px; max-width: 140px }
+      @media (max-width: 400px) {
+        body { padding: 0 8px 8px }
+        .site-header { margin: 0 -8px; padding: 8px }
+        .card, .card-media { width: 135px !important; flex: 0 0 135px; max-width: 135px }
+        .gallery-card .card { width: 135px !important }
         .cards { gap: 10px }
-        body { margin: 8px }
       }
-      
-      /* Gallery/Calendar mode styles */
-      .gallery-container { display: grid; gap: 24px; margin-bottom: 24px }
-      .gallery-date-section { background: rgba(0,0,0,0.3); border-radius: 8px; padding: 16px; border: 1px solid rgba(255,255,255,0.1) }
-      .gallery-date-header { font-size: 1.2rem; font-weight: 700; margin-bottom: 12px; padding-bottom: 8px; border-bottom: 2px solid rgba(255,255,255,0.2) }
-      .gallery-items { display: flex; gap: 12px; flex-wrap: wrap; align-items: flex-start }
-      .gallery-card { position: relative }
-      .gallery-card .card { width: 240px; display: flex; flex-direction: column }
-      .gallery-card .card-img-top { width: 100%; height: 360px; object-fit: cover }
-      .gallery-card-title { font-size: 0.85rem; margin-top: 6px; line-height: 1.2; font-weight: 600 }
-      .gallery-card-rating { position: absolute; right: 6px; top: 6px; background: rgba(0,0,0,0.8); color: #fff; padding: 0.2rem 0.4rem; border-radius: 0.25rem; font-weight: 700; font-size: 0.85rem }
-      
-      .view-toggle { display: flex; gap: 8px; align-items: center }
-      .view-toggle a { padding: 0.4rem 0.8rem; border-radius: 0.25rem; text-decoration: none; border: 1px solid rgba(255,255,255,0.2); transition: all 0.18s ease }
-      .view-toggle a.active { background: rgba(255,255,255,0.15); border-color: rgba(255,255,255,0.4) }
-      .view-toggle a:hover { background: rgba(255,255,255,0.1) }
 
-      /* Dark mode: follow system preference */
+      /* === DARK MODE === */
       @media (prefers-color-scheme: dark) {
-        body { background: #07101a; color: #dbeefc }
-        .card { background: #071725; color: #dbeefc; border: 1px solid rgba(255,255,255,0.04) }
-        .card-img-top { background: #0b1620 }
-        .listing-sub { color: #9fb3c6 }
-        .site-title-link { color: #dbeefc }
-        .badge.bg-light { background: #0f2430 !important; color: #dbeefc !important; border: 1px solid rgba(255,255,255,0.03) }
-        a { color: #bfe1ff }
+        body { background: #0a0f14; color: #f0f4f8 }
+        .site-header { background: rgba(10,15,20,0.9); border-bottom-color: rgba(255,255,255,0.07) }
+        .card { background: #111820; color: #f0f4f8; border: 1px solid rgba(255,255,255,0.08) }
+        .card-img-top { background: #0d1825 }
+        .card:hover, .card:focus-within { transform: translateY(-5px); box-shadow: 0 0 0 2px #e03a3a, 0 14px 32px rgba(0,0,0,0.7) }
+        .listing-sub { color: #8fa3b1 }
+        .listing-title a { color: #f0f4f8 }
+        .site-title-link { color: #f0f4f8 }
+        .tag { background: rgba(255,255,255,0.07); color: #c2d8e8; border-color: rgba(255,255,255,0.1) }
+        .tag:hover { background: rgba(224,58,58,0.18); border-color: rgba(224,58,58,0.35); color: #ff8080 }
+        .filter-chip { background: rgba(224,58,58,0.15); border-color: rgba(224,58,58,0.35); color: #ff8080 }
+        .view-toggle { background: rgba(255,255,255,0.09) }
+        .view-toggle a:hover:not(.active) { background: rgba(255,255,255,0.1) }
+        a { color: #a8cce8 }
+        a:hover { color: #c8dde8 }
         .page-link { color: #cfe6ff }
-        .imdb-rating { background: #e6c514; color: #000 }
-        .card:hover,.card:focus-within{transform:translateY(-6px);box-shadow:0 12px 30px rgba(0,0,0,0.6)}
-        .gallery-date-section { background: rgba(255,255,255,0.02) }
-        .gallery-card-title { color: #dbeefc }
-
-        /* style form selects to match dark theme */
-        .form-select, select, .form-select.form-select-sm { background: #07202a; color: #dbeefc; border: 1px solid rgba(255,255,255,0.06) }
-        .form-select:focus, select:focus { box-shadow: 0 0 0 0.2rem rgba(191,225,255,0.06); outline: none }
-        .form-select option, select option { background: #071725; color: #dbeefc }
-
-        /* style form inputs to match dark theme */
-        .form-control, input[type="search"] { background: #07202a; color: #dbeefc; border: 1px solid rgba(255,255,255,0.06) }
-        .form-control:focus, input[type="search"]:focus { background: #081a22; color: #dbeefc; box-shadow: 0 0 0 0.2rem rgba(191,225,255,0.06); outline: none; border-color: rgba(191,225,255,0.15) }
+        .form-select, select, .form-select.form-select-sm { background: #0d1825; color: #f0f4f8; border: 1px solid rgba(255,255,255,0.1) }
+        .form-select:focus, select:focus { box-shadow: 0 0 0 0.2rem rgba(191,225,255,0.08); outline: none }
+        .form-select option, select option { background: #111820; color: #f0f4f8 }
+        .form-control, input[type="search"] { background: #0d1825; color: #f0f4f8; border: 1px solid rgba(255,255,255,0.1) }
+        .form-control:focus, input[type="search"]:focus { background: #0d1825; color: #f0f4f8; box-shadow: 0 0 0 0.2rem rgba(224,58,58,0.12); border-color: rgba(224,58,58,0.4) }
         .form-control::placeholder, input[type="search"]::placeholder { color: #6d8592 }
-
-        /* pagination / page links */
-        .pagination .page-link { background: transparent; color: #cfe6ff; border: 1px solid rgba(255,255,255,0.03); }
-        .pagination .page-item .page-link { background: #081a22; color: #cfe6ff }
-        .pagination .page-item.active .page-link { background: #0f495b; color: #fff }
-        
-        /* statistics section dark mode */
-        .meta { background: rgba(255,255,255,0.02) !important; border-color: rgba(255,255,255,0.1) !important; }
-        .page-item.disabled .page-link { color: #6d8592; background: transparent }
+        .pagination .page-link { background: #111820; color: #cfe6ff; border: 1px solid rgba(255,255,255,0.07) }
+        .pagination .page-item.active .page-link { background: #e03a3a; border-color: #e03a3a; color: #fff }
+        .page-item.disabled .page-link { color: #4d6370; background: transparent }
+        .gallery-date-section { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.08) }
+        .gallery-date-header { border-bottom-color: rgba(255,255,255,0.1) }
+        .stats-section { background: rgba(255,255,255,0.02); border-color: rgba(255,255,255,0.08) }
+        .stat-card { background: rgba(255,255,255,0.03); border-color: rgba(255,255,255,0.07) }
+        .stat-label { color: #8fa3b1 }
+        .stats-meta { border-top-color: rgba(255,255,255,0.08); color: #8fa3b1 }
+        .stats-meta a { color: #a8cce8 }
+        .poster-placeholder { background: rgba(255,255,255,0.05) }
+        .imdb-rating { background: #e6c514; color: #000 }
+        .flash-success { color: #4ade80 }
+        .flash-error { color: #f87171 }
       }
     </style>
   </head>
   <body>
-    <!-- Header with title on left, search on right -->
-    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; flex-wrap: wrap;">
-      <div>
-        <h1 class="mb-2">
-          <a href="{{ url_for('index') }}" class="site-title-link" aria-label="Home">
-            <svg class="site-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
-              <circle cx="12" cy="12" r="10" fill="#e03a3a"></circle>
-              <polygon points="10,8 16,12 10,16" fill="#fff"></polygon>
-            </svg>
-            <span class="site-title-text">{{ selected_user|capitalize }} Trakt History</span>
-          </a>
-        </h1>
-        <!-- View toggle and user selector under title -->
-        <div style="display: flex; gap: 16px; align-items: center; margin-top: 8px;">
-          <div class="view-toggle">
-            <a href="{{ clean_url('index', user=selected_user, view='gallery', page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="{% if view_mode == 'gallery' %}active{% endif %}" title="Gallery View">🎬 Gallery</a>
-            <a href="{{ clean_url('index', user=selected_user, view='calendar', page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="{% if view_mode == 'calendar' %}active{% endif %}" title="Calendar View">📅 Calendar</a>
+    <header class="site-header">
+      <div class="site-header-inner">
+        <div>
+          <h1 class="mb-0" style="font-size:1.25rem;font-weight:700">
+            <a href="{{ url_for('index') }}" class="site-title-link" aria-label="Home">
+              <svg class="site-logo" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">
+                <circle cx="12" cy="12" r="10" fill="#e03a3a"></circle>
+                <polygon points="10,8 16,12 10,16" fill="#fff"></polygon>
+              </svg>
+              <span class="site-title-text">{{ selected_user|capitalize }} Trakt History</span>
+            </a>
+          </h1>
+          <div style="display:flex;gap:14px;align-items:center;margin-top:10px">
+            <div class="view-toggle">
+              <a href="{{ clean_url('index', user=selected_user, view='gallery', page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="{% if view_mode == 'gallery' %}active{% endif %}" title="Gallery View">🎬 Gallery</a>
+              <a href="{{ clean_url('index', user=selected_user, view='calendar', page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" class="{% if view_mode == 'calendar' %}active{% endif %}" title="Calendar View">📅 Calendar</a>
+            </div>
+            {% if all_users|length > 1 %}
+            <div style="display:flex;gap:8px;align-items:center">
+              <label for="user_select" class="form-label small mb-0" style="white-space:nowrap;font-weight:600">👤 View:</label>
+              <select id="user_select" class="form-select form-select-sm" style="width:auto;min-width:140px" onchange="if (this.selectedOptions[0] && this.selectedOptions[0].dataset.url) window.location = this.selectedOptions[0].dataset.url;">
+                {% for u in all_users %}
+                  <option value="{{ u }}" data-url="{{ clean_url('index', user=u, view=view_mode, page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" {% if selected_user == u %}selected{% endif %}>{{ u }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% endif %}
           </div>
-          {% if all_users|length > 1 %}
-          <div style="margin: 0; display: flex; gap: 8px; align-items: center;">
-            <label for="user_select" class="form-label small mb-0" style="white-space: nowrap; font-weight: 600;">👤 View:</label>
-            <select id="user_select" class="form-select form-select-sm" style="width: auto; min-width: 140px;" onchange="if (this.selectedOptions[0] && this.selectedOptions[0].dataset.url) window.location = this.selectedOptions[0].dataset.url;">
-              {% for u in all_users %}
-                <option value="{{ u }}" data-url="{{ clean_url('index', user=u, view=view_mode, page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}" {% if selected_user == u %}selected{% endif %}>{{ u }}</option>
-              {% endfor %}
-            </select>
-          </div>
-          {% endif %}
         </div>
+        <form method="get" class="d-flex" style="max-width:340px;margin-top:4px">
+          <input type="search" name="search" class="form-control" placeholder="Search by title, actor, or year…" value="{{ data.filter_search or '' }}" aria-label="Search">
+          <input type="hidden" name="per_page" value="{{ data.per_page }}">
+          <input type="hidden" name="user" value="{{ selected_user }}">
+          <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
+          <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
+          <input type="hidden" name="media" value="{{ data.filter_media or 'both' }}">
+          <input type="hidden" name="period" value="{{ data.filter_period or 'all' }}">
+          <input type="hidden" name="year" value="{{ data.filter_year or '' }}">
+          <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
+          <button type="submit" class="btn btn-danger ms-2" style="white-space:nowrap">Search</button>
+        </form>
       </div>
-      <!-- Search in top right -->
-      <form method="get" class="d-flex" style="max-width: 350px; margin-top: 8px;">
-        <input type="search" name="search" class="form-control" placeholder="Search by title, actor, or year..." value="{{ data.filter_search or '' }}" aria-label="Search">
-        <input type="hidden" name="per_page" value="{{ data.per_page }}">
-        <input type="hidden" name="user" value="{{ selected_user }}">
-        <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
-        <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
-        <input type="hidden" name="media" value="{{ data.filter_media or 'both' }}">
-        <input type="hidden" name="period" value="{{ data.filter_period or 'all' }}">
-        <input type="hidden" name="year" value="{{ data.filter_year or '' }}">
-        <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
-        <button type="submit" class="btn btn-primary ms-2">Search</button>
-      </form>
-    </div>
-    <!-- generated meta moved to bottom of page -->
+    </header>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <ul>
+        <ul class="mb-3">
         {% for category, message in messages %}
           <li class="flash-{{ category }}">{{ message }}</li>
         {% endfor %}
@@ -185,8 +240,8 @@
     {% endwith %}
 
     {% if view_mode == 'calendar' %}
-      <!-- Calendar View with Pagination -->
-      <div class="top-row d-flex align-items-center mb-2" style="gap:12px">
+      <!-- Calendar View -->
+      <div class="top-row d-flex align-items-center mb-3" style="gap:12px;flex-wrap:wrap">
         <nav aria-label="Page navigation">
           <ul class="pagination pagination-sm mb-0">
             {% if data.page > 1 %}
@@ -199,7 +254,7 @@
           </ul>
         </nav>
       </div>
-      
+
       <div class="gallery-container">
         {% for watched_date, items_on_date in data.calendar_items.items() %}
           <div class="gallery-date-section">
@@ -219,67 +274,62 @@
                           {% if it.thumbnail %}
                             <img src="{{ it.thumbnail }}" class="card-img-top" alt="poster">
                           {% else %}
-                            <div style="width:100%;height:320px;background:#eee;border-radius:4px"></div>
+                            <div class="poster-placeholder"></div>
                           {% endif %}
                         </a>
                       {% else %}
                         {% if it.thumbnail %}
                           <img src="{{ it.thumbnail }}" class="card-img-top" alt="poster">
                         {% else %}
-                          <div style="width:100%;height:320px;background:#eee;border-radius:4px"></div>
+                          <div class="poster-placeholder"></div>
                         {% endif %}
                       {% endif %}
-
                       {% if it.rating is not none %}
                         <span class="rating-badge">⭐ {{ it.rating }}</span>
                       {% endif %}
                     </div>
-                  
-                  <div class="card-body">
-                    {% if it.type == 'episode' and it.show and it.show.title %}
-                      {# Show the series title + year + SxEx on the first line, then episode title on the next line #}
-                      {% if imdb_url %}
-                        <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</a></h6>
-                      {% else %}
-                        <h6 class="listing-title clamp-2">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</h6>
-                      {% endif %}
-                      {% if it.cast %}
-                        <div class="small mb-1">
-                          {% for a in it.cast %}
-                            <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated, view='calendar') }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
-                          {% endfor %}
-                        </div>
-                      {% endif %}
-                      <div class="small mt-1 clamp-2">{{ it.title }}</div>
-                    {% else %}
-                      {% if imdb_url %}
-                        <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</a></h6>
-                      {% else %}
-                        <h6 class="listing-title clamp-2">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</h6>
-                      {% endif %}
-                      {% if it.cast %}
-                        <div class="small mb-2">
-                          {% for a in it.cast %}
-                            <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated, view='calendar') }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
-                          {% endfor %}
-                        </div>
-                      {% endif %}
-                    {% endif %}
 
-                    <div class="listing-sub small">
-                      <div>Watched: {{ it.watched_at or 'N/A' }}</div>
-                      {% if it.runtime %}
-                        <div>Duration: {{ it.runtime }} min</div>
+                    <div class="card-body">
+                      {% if it.type == 'episode' and it.show and it.show.title %}
+                        {% if imdb_url %}
+                          <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</a></h6>
+                        {% else %}
+                          <h6 class="listing-title clamp-2">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</h6>
+                        {% endif %}
+                        {% if it.cast %}
+                          <div class="small mb-1">
+                            {% for a in it.cast %}
+                              <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated, view='calendar') }}" class="tag">{{ a }}</a>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                        <div class="small mt-1 clamp-2">{{ it.title }}</div>
+                      {% else %}
+                        {% if imdb_url %}
+                          <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</a></h6>
+                        {% else %}
+                          <h6 class="listing-title clamp-2">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</h6>
+                        {% endif %}
+                        {% if it.cast %}
+                          <div class="small mb-2">
+                            {% for a in it.cast %}
+                              <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated, view='calendar') }}" class="tag">{{ a }}</a>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
                       {% endif %}
-                      {% if it.genres %}
-                        <div>
-                          {% for g in it.genres %}
-                            <a href="{{ clean_url('index', genre=g, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, actor=data.filter_actor, search=data.filter_search, rated=data.filter_rated, view='calendar') }}" class="badge bg-light text-dark text-decoration-none">{{ g }}</a>
-                          {% endfor %}
-                        </div>
-                      {% endif %}
+                      <div class="listing-sub small">
+                        <div>Watched: {{ it.watched_at or 'N/A' }}</div>
+                        {% if it.runtime %}<div>Duration: {{ it.runtime }} min</div>{% endif %}
+                        {% if it.genres %}
+                          <div style="margin-top:3px">
+                            {% for g in it.genres %}
+                              <a href="{{ clean_url('index', genre=g, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, actor=data.filter_actor, search=data.filter_search, rated=data.filter_rated, view='calendar') }}" class="tag">{{ g }}</a>
+                            {% endfor %}
+                          </div>
+                        {% endif %}
+                      </div>
                     </div>
-                  </div>
                   </div>
                 </div>
               {% endfor %}
@@ -287,9 +337,10 @@
           </div>
         {% endfor %}
       </div>
+
     {% else %}
-      <!-- Gallery View (card grid) -->
-      <div class="top-row d-flex align-items-center mb-2" style="gap:12px">
+      <!-- Gallery View -->
+      <div class="top-row d-flex align-items-center mb-3" style="gap:12px;flex-wrap:wrap">
         <nav aria-label="Page navigation">
           <ul class="pagination pagination-sm mb-0">
             {% if data.page > 1 %}
@@ -302,148 +353,135 @@
           </ul>
         </nav>
 
-      <div class="meta-controls d-flex align-items-center" style="gap:8px">
-        {% if data.filter_search %}
-          <span class="small">Search: <strong>{{ data.filter_search }}</strong></span>
-          &nbsp;<a href="{{ clean_url('index', user=selected_user, page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, view=view_mode) }}" class="small">(clear)</a>
-          &nbsp;|&nbsp;
-        {% endif %}
-        {% if data.filter_genre %}
-          <span class="small">Filtered by genre: <strong>{{ data.filter_genre }}</strong></span>
-          &nbsp;<a href="{{ clean_url('index', user=selected_user, page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, view=view_mode) }}" class="small">(clear)</a>
-          &nbsp;|&nbsp;
-        {% endif %}
-        {% if data.filter_actor %}
-          <span class="small">Filtered by actor: <strong>{{ data.filter_actor }}</strong></span>
-          &nbsp;<a href="{{ clean_url('index', user=selected_user, page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, view=view_mode) }}" class="small">(clear)</a>
-          &nbsp;|&nbsp;
-        {% endif %}
-        <form class="d-inline d-flex align-items-center" method="get" style="gap:6px">
-          <input type="hidden" name="user" value="{{ selected_user }}">
-          <label for="per_page_top" class="form-label small mb-0 me-1">Show:</label>
-          <select id="per_page_top" name="per_page" class="form-select form-select-sm me-2" onchange="this.form.submit()">
-            {% for opt in per_page_options %}
-              <option value="{{ opt }}" {% if data.per_page == opt %}selected{% endif %}>{{ opt }}</option>
-            {% endfor %}
-          </select>
-          <label for="media_top" class="form-label small mb-0 me-1">Type:</label>
-          <select id="media_top" name="media" class="form-select form-select-sm me-2" onchange="this.form.submit()">
-            <option value="both" {% if data.filter_media == 'both' %}selected{% endif %}>🎬📺 Both</option>
-            <option value="movies" {% if data.filter_media == 'movies' %}selected{% endif %}>🎬 Movies</option>
-            <option value="series" {% if data.filter_media == 'series' %}selected{% endif %}>📺 Series</option>
-          </select>
-          <label for="period_top" class="form-label small mb-0 me-1">When:</label>
-          <select id="period_top" name="period" class="form-select form-select-sm me-2" onchange="this.form.submit()">
-            <option value="all" {% if data.filter_period == 'all' %}selected{% endif %}>📅 All time</option>
-            <option value="week" {% if data.filter_period == 'week' %}selected{% endif %}>📅 This week</option>
-            <option value="month" {% if data.filter_period == 'month' %}selected{% endif %}>📅 This month</option>
-            <option value="year" {% if data.filter_period == 'year' %}selected{% endif %}>📅 This year</option>
-          </select>
-          <label for="year_top" class="form-label small mb-0 me-1">Year:</label>
-          <select id="year_top" name="year" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width: 100px;">
-            <option value="">🗓️ All</option>
-            {% for yr in available_years %}
-              <option value="{{ yr }}" {% if data.filter_year and data.filter_year|string == yr|string %}selected{% endif %}>{{ yr }}</option>
-            {% endfor %}
-          </select>
-          <label for="rated_top" class="form-label small mb-0 me-1">Rated:</label>
-          <select id="rated_top" name="rated" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width: 90px;">
-            <option value="">⭐ All</option>
-            <option value="yes" {% if data.filter_rated == 'yes' %}selected{% endif %}>⭐ Rated only</option>
-          </select>
-          <input type="hidden" name="page" value="1">
-          <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
-          <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
-          <input type="hidden" name="search" value="{{ data.filter_search or '' }}">
-          <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
-          <input type="hidden" name="view" value="{{ view_mode }}">
-        </form>
+        <div class="meta-controls d-flex align-items-center" style="gap:8px;flex-wrap:wrap">
+          {% if data.filter_search %}
+            <span class="filter-chip">🔍 {{ data.filter_search }} <a href="{{ clean_url('index', user=selected_user, page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, view=view_mode) }}" title="Remove filter">×</a></span>
+          {% endif %}
+          {% if data.filter_genre %}
+            <span class="filter-chip">🎭 {{ data.filter_genre }} <a href="{{ clean_url('index', user=selected_user, page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, view=view_mode) }}" title="Remove filter">×</a></span>
+          {% endif %}
+          {% if data.filter_actor %}
+            <span class="filter-chip">👤 {{ data.filter_actor }} <a href="{{ clean_url('index', user=selected_user, page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, view=view_mode) }}" title="Remove filter">×</a></span>
+          {% endif %}
+          <form class="d-inline d-flex align-items-center" method="get" style="gap:6px">
+            <input type="hidden" name="user" value="{{ selected_user }}">
+            <label for="per_page_top" class="form-label small mb-0 me-1">Show:</label>
+            <select id="per_page_top" name="per_page" class="form-select form-select-sm me-2" onchange="this.form.submit()">
+              {% for opt in per_page_options %}
+                <option value="{{ opt }}" {% if data.per_page == opt %}selected{% endif %}>{{ opt }}</option>
+              {% endfor %}
+            </select>
+            <label for="media_top" class="form-label small mb-0 me-1">Type:</label>
+            <select id="media_top" name="media" class="form-select form-select-sm me-2" onchange="this.form.submit()">
+              <option value="both" {% if data.filter_media == 'both' %}selected{% endif %}>🎬📺 Both</option>
+              <option value="movies" {% if data.filter_media == 'movies' %}selected{% endif %}>🎬 Movies</option>
+              <option value="series" {% if data.filter_media == 'series' %}selected{% endif %}>📺 Series</option>
+            </select>
+            <label for="period_top" class="form-label small mb-0 me-1">When:</label>
+            <select id="period_top" name="period" class="form-select form-select-sm me-2" onchange="this.form.submit()">
+              <option value="all" {% if data.filter_period == 'all' %}selected{% endif %}>📅 All time</option>
+              <option value="week" {% if data.filter_period == 'week' %}selected{% endif %}>📅 This week</option>
+              <option value="month" {% if data.filter_period == 'month' %}selected{% endif %}>📅 This month</option>
+              <option value="year" {% if data.filter_period == 'year' %}selected{% endif %}>📅 This year</option>
+            </select>
+            <label for="year_top" class="form-label small mb-0 me-1">Year:</label>
+            <select id="year_top" name="year" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width:100px">
+              <option value="">🗓️ All</option>
+              {% for yr in available_years %}
+                <option value="{{ yr }}" {% if data.filter_year and data.filter_year|string == yr|string %}selected{% endif %}>{{ yr }}</option>
+              {% endfor %}
+            </select>
+            <label for="rated_top" class="form-label small mb-0 me-1">Rated:</label>
+            <select id="rated_top" name="rated" class="form-select form-select-sm me-2" onchange="this.form.submit()" style="min-width:90px">
+              <option value="">⭐ All</option>
+              <option value="yes" {% if data.filter_rated == 'yes' %}selected{% endif %}>⭐ Rated only</option>
+            </select>
+            <input type="hidden" name="page" value="1">
+            <input type="hidden" name="genre" value="{{ data.filter_genre or '' }}">
+            <input type="hidden" name="actor" value="{{ data.filter_actor or '' }}">
+            <input type="hidden" name="search" value="{{ data.filter_search or '' }}">
+            <input type="hidden" name="rated" value="{{ data.filter_rated or '' }}">
+            <input type="hidden" name="view" value="{{ view_mode }}">
+          </form>
+        </div>
       </div>
-    </div>
 
-    <div class="cards">
-      {% for it in data['items'] %}
-        {% set imdb_url = None %}
-        {% if it.ids and it.ids.imdb %}
-          {% set imdb_url = 'https://www.imdb.com/title/' ~ it.ids.imdb ~ '/' %}
-        {% endif %}
+      <div class="cards">
+        {% for it in data['items'] %}
+          {% set imdb_url = None %}
+          {% if it.ids and it.ids.imdb %}
+            {% set imdb_url = 'https://www.imdb.com/title/' ~ it.ids.imdb ~ '/' %}
+          {% endif %}
 
-        <div class="card" aria-label="media-card">
-          <div class="card-media">
-            {% if imdb_url %}
-              <a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer" class="poster-link">
+          <div class="card" aria-label="media-card">
+            <div class="card-media">
+              {% if imdb_url %}
+                <a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer" class="poster-link">
+                  {% if it.thumbnail %}
+                    <img src="{{ it.thumbnail }}" class="card-img-top" alt="poster">
+                  {% else %}
+                    <div class="poster-placeholder"></div>
+                  {% endif %}
+                </a>
+              {% else %}
                 {% if it.thumbnail %}
                   <img src="{{ it.thumbnail }}" class="card-img-top" alt="poster">
                 {% else %}
-                  <div style="width:100%;height:320px;background:#eee;border-radius:4px"></div>
+                  <div class="poster-placeholder"></div>
                 {% endif %}
-              </a>
-            {% else %}
-              {% if it.thumbnail %}
-                <img src="{{ it.thumbnail }}" class="card-img-top" alt="poster">
-              {% else %}
-                <div style="width:100%;height:320px;background:#eee;border-radius:4px"></div>
               {% endif %}
-            {% endif %}
-
-            {% if it.rating is not none %}
-              <span class="rating-badge">⭐ {{ it.rating }}</span>
-            {% endif %}
-          </div>
-
-          <div class="card-body">
-            {% if it.type == 'episode' and it.show and it.show.title %}
-              {# Show the series title + year + SxEx on the first line, then episode title on the next line #}
-              {% if imdb_url %}
-                <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</a></h6>
-              {% else %}
-                <h6 class="listing-title clamp-2">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</h6>
-              {% endif %}
-              {% if it.cast %}
-                <div class="small mb-1">
-                  {% for a in it.cast %}
-                    <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
-                  {% endfor %}
-                </div>
-              {% endif %}
-              <div class="small mt-1 clamp-2">{{ it.title }}</div>
-            {% else %}
-              {% if imdb_url %}
-                <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</a></h6>
-              {% else %}
-                <h6 class="listing-title clamp-2">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</h6>
-              {% endif %}
-              {% if it.cast %}
-                <div class="small mb-2">
-                  {% for a in it.cast %}
-                    <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated) }}" class="badge bg-light text-dark text-decoration-none">{{ a }}</a>
-                  {% endfor %}
-                </div>
-              {% endif %}
-            {% endif %}
-
-            <div class="listing-sub small">
-              <div>Watched: {{ it.watched_at or 'N/A' }}</div>
-              {% if it.runtime %}
-                <div>Duration: {{ it.runtime }} min</div>
-              {% endif %}
-              {% if it.genres %}
-                <div>Genres:
-                  {% for g in it.genres %}
-                    <a href="{{ clean_url('index', genre=g, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, actor=data.filter_actor, search=data.filter_search, rated=data.filter_rated) }}" class="badge bg-light text-dark text-decoration-none">{{ g }}</a>
-                  {% endfor %}
-                </div>
+              {% if it.rating is not none %}
+                <span class="rating-badge">⭐ {{ it.rating }}</span>
               {% endif %}
             </div>
 
-            <!-- rating overlay is shown on the poster; no inline yellow rating here -->
+            <div class="card-body">
+              {% if it.type == 'episode' and it.show and it.show.title %}
+                {% if imdb_url %}
+                  <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</a></h6>
+                {% else %}
+                  <h6 class="listing-title clamp-2">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</h6>
+                {% endif %}
+                {% if it.cast %}
+                  <div class="small mb-1">
+                    {% for a in it.cast %}
+                      <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated) }}" class="tag">{{ a }}</a>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+                <div class="small mt-1 clamp-2">{{ it.title }}</div>
+              {% else %}
+                {% if imdb_url %}
+                  <h6 class="listing-title clamp-2"><a href="{{ imdb_url }}" target="_blank" rel="noopener noreferrer">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</a></h6>
+                {% else %}
+                  <h6 class="listing-title clamp-2">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</h6>
+                {% endif %}
+                {% if it.cast %}
+                  <div class="small mb-2">
+                    {% for a in it.cast %}
+                      <a href="{{ clean_url('index', actor=a, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, genre=data.filter_genre, search=data.filter_search, rated=data.filter_rated) }}" class="tag">{{ a }}</a>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              {% endif %}
+              <div class="listing-sub small">
+                <div>Watched: {{ it.watched_at or 'N/A' }}</div>
+                {% if it.runtime %}<div>Duration: {{ it.runtime }} min</div>{% endif %}
+                {% if it.genres %}
+                  <div style="margin-top:3px">
+                    {% for g in it.genres %}
+                      <a href="{{ clean_url('index', genre=g, user=selected_user, per_page=data.per_page, media=data.filter_media, period=data.filter_period, year=data.filter_year, actor=data.filter_actor, search=data.filter_search, rated=data.filter_rated) }}" class="tag">{{ g }}</a>
+                    {% endfor %}
+                  </div>
+                {% endif %}
+              </div>
+            </div>
           </div>
-        </div>
-      {% endfor %}
-    </div>
+        {% endfor %}
+      </div>
     {% endif %}
 
-    <div class="bottom-row d-flex align-items-center mt-3" style="gap:12px">
+    <div class="bottom-row d-flex align-items-center mt-3" style="gap:12px;flex-wrap:wrap">
       <nav aria-label="Page navigation">
         <ul class="pagination pagination-sm mb-0">
           {% if data.page > 1 %}
@@ -456,21 +494,15 @@
         </ul>
       </nav>
 
-      <div class="meta-controls d-flex align-items-center" style="gap:8px">
+      <div class="meta-controls d-flex align-items-center" style="gap:8px;flex-wrap:wrap">
         {% if data.filter_search %}
-          <span class="small">Search: <strong>{{ data.filter_search }}</strong></span>
-          &nbsp;<a href="{{ clean_url('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, user=selected_user, view=view_mode) }}" class="small">(clear)</a>
-          &nbsp;|&nbsp;
+          <span class="filter-chip">🔍 {{ data.filter_search }} <a href="{{ clean_url('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, user=selected_user, view=view_mode) }}" title="Remove filter">×</a></span>
         {% endif %}
         {% if data.filter_genre %}
-          <span class="small">Filtered by genre: <strong>{{ data.filter_genre }}</strong></span>
-          &nbsp;<a href="{{ clean_url('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, user=selected_user, view=view_mode) }}" class="small">(clear)</a>
-          &nbsp;|&nbsp;
+          <span class="filter-chip">🎭 {{ data.filter_genre }} <a href="{{ clean_url('index', page=data.page, per_page=data.per_page, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, user=selected_user, view=view_mode) }}" title="Remove filter">×</a></span>
         {% endif %}
         {% if data.filter_actor %}
-          <span class="small">Filtered by actor: <strong>{{ data.filter_actor }}</strong></span>
-          &nbsp;<a href="{{ clean_url('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, user=selected_user, view=view_mode) }}" class="small">(clear)</a>
-          &nbsp;|&nbsp;
+          <span class="filter-chip">👤 {{ data.filter_actor }} <a href="{{ clean_url('index', page=data.page, per_page=data.per_page, genre=data.filter_genre, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated, user=selected_user, view=view_mode) }}" title="Remove filter">×</a></span>
         {% endif %}
         <form class="d-inline d-flex align-items-center" method="get" style="gap:6px">
           <label for="per_page" class="form-label small mb-0">Show:</label>
@@ -493,14 +525,14 @@
             <option value="year" {% if data.filter_period == 'year' %}selected{% endif %}>📅 This year</option>
           </select>
           <label for="year" class="form-label small mb-0 ms-2">Year:</label>
-          <select id="year" name="year" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width: 100px;">
+          <select id="year" name="year" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width:100px">
             <option value="">🗓️ All</option>
             {% for yr in available_years %}
               <option value="{{ yr }}" {% if data.filter_year and data.filter_year|string == yr|string %}selected{% endif %}>{{ yr }}</option>
             {% endfor %}
           </select>
           <label for="rated" class="form-label small mb-0 ms-2">Rated:</label>
-          <select id="rated" name="rated" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width: 90px;">
+          <select id="rated" name="rated" class="form-select form-select-sm" onchange="this.form.submit()" style="min-width:90px">
             <option value="">⭐ All</option>
             <option value="yes" {% if data.filter_rated == 'yes' %}selected{% endif %}>⭐ Rated only</option>
           </select>
@@ -515,62 +547,70 @@
     </div>
 
     {% if stats %}
-    <div class="meta mt-3 p-3" style="background: rgba(0,0,0,0.02); border-radius: 8px; border: 1px solid rgba(0,0,0,0.1);">
-      <h6 class="mb-3"><strong>📊 Statistics</strong></h6>
-      <div class="row g-2 small">
-        <div class="col-md-3">
-          <strong>⏱️ Total Watch Time:</strong> {{ stats.total_hours }}h ({{ stats.total_days }} days)
+    <div class="stats-section">
+      <div class="stats-section-title">📊 Statistics</div>
+      <div class="stats-grid">
+        <div class="stat-card">
+          <div class="stat-icon">⏱️</div>
+          <div class="stat-value">{{ stats.total_hours }}h</div>
+          <div class="stat-label">Watch time · {{ stats.total_days }} days</div>
         </div>
-        <div class="col-md-3">
-          <strong>🎬 Movies:</strong> {{ stats.total_movies }} &nbsp;|&nbsp; <strong>📺 Episodes:</strong> {{ stats.total_episodes }}
+        <div class="stat-card">
+          <div class="stat-icon">🎬</div>
+          <div class="stat-value">{{ stats.total_movies }}</div>
+          <div class="stat-label">Movies watched</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">📺</div>
+          <div class="stat-value">{{ stats.total_episodes }}</div>
+          <div class="stat-label">Episodes watched</div>
         </div>
         {% if stats.top_actor %}
-        <div class="col-md-3">
-          <strong>⭐ Top Actor:</strong> {{ stats.top_actor[0] }} ({{ stats.top_actor[1] }}x)
+        <div class="stat-card">
+          <div class="stat-icon">🎭</div>
+          <div class="stat-value" style="font-size:0.95rem">{{ stats.top_actor[0] }}</div>
+          <div class="stat-label">Top actor · {{ stats.top_actor[1] }}x</div>
         </div>
         {% endif %}
         {% if stats.top_genre %}
-        <div class="col-md-3">
-          <strong>🎭 Top Genre:</strong> {{ stats.top_genre[0] }} ({{ stats.top_genre[1] }}x)
-        </div>
-        {% endif %}
-      </div>
-      <div class="row g-2 small mt-1">
-        {% if stats.top_year %}
-        <div class="col-md-3">
-          <strong>📅 Top Release Year:</strong> {{ stats.top_year[0] }} ({{ stats.top_year[1] }} items)
+        <div class="stat-card">
+          <div class="stat-icon">🎞️</div>
+          <div class="stat-value" style="font-size:0.95rem">{{ stats.top_genre[0] }}</div>
+          <div class="stat-label">Top genre · {{ stats.top_genre[1] }}x</div>
         </div>
         {% endif %}
         {% if stats.avg_rating %}
-        <div class="col-md-3">
-          <strong>⭐ Average Rating:</strong> {{ stats.avg_rating }}/10
+        <div class="stat-card">
+          <div class="stat-icon">⭐</div>
+          <div class="stat-value">{{ stats.avg_rating }}<span style="font-size:0.7rem;opacity:0.6">/10</span></div>
+          <div class="stat-label">Average rating</div>
         </div>
         {% endif %}
-      </div>
-      <hr class="my-2" style="opacity: 0.05;">
-      <div class="row g-2 small">
-        <div class="col-md-3">
-          <strong>🕐 Generated:</strong> {{ data.generated_at or 'N/A' }}
+        {% if stats.top_year %}
+        <div class="stat-card">
+          <div class="stat-icon">📅</div>
+          <div class="stat-value">{{ stats.top_year[0] }}</div>
+          <div class="stat-label">Top release year · {{ stats.top_year[1] }} items</div>
         </div>
-        <div class="col-md-3">
-          <strong>⚡ Generation Time:</strong> {% if data.generation_time %}{{ data.generation_time }}s{% else %}N/A{% endif %}
-        </div>
-        <div class="col-md-3">
-          <strong>📊 Total Items:</strong> {{ data.count }}
-        </div>
-        <div class="col-md-3">
-          <a href="{{ url_for('refresh', user=selected_user) }}" class="text-decoration-none">🔄 Refresh now</a>
-        </div>
+        {% endif %}
         {% if stats.rated_count is not none %}
-        <div class="col-md-3">
-          <strong>⭐ Rated Items:</strong> {{ stats.rated_count }}
+        <div class="stat-card">
+          <div class="stat-icon">🗳️</div>
+          <div class="stat-value">{{ stats.rated_count }}</div>
+          <div class="stat-label">Items rated</div>
         </div>
         {% endif %}
-        {% if ratings_note %}
-        <div class="col-md-9">
-          <strong>ℹ️ Ratings:</strong> {{ ratings_note }}
+        <div class="stat-card">
+          <div class="stat-icon">📦</div>
+          <div class="stat-value">{{ data.count }}</div>
+          <div class="stat-label">Total items</div>
         </div>
-        {% endif %}
+      </div>
+      <div class="stats-meta">
+        <span>🕐 Generated: {{ data.generated_at or 'N/A' }}</span>
+        <span>⚡ {{ data.generation_time }}s</span>
+        {% if ratings_note %}<span>ℹ️ {{ ratings_note }}</span>{% endif %}
+        <a href="{{ url_for('refresh', user=selected_user) }}" style="text-decoration:none">🔄 Refresh</a>
       </div>
     </div>
     {% endif %}
