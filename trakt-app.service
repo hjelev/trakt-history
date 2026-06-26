@@ -7,6 +7,7 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/git/trakt-history
 Environment="PATH=/home/pi/git/trakt-history/.venv/bin"
+Environment="FLASK_DEBUG=0"
 ExecStart=/home/pi/git/trakt-history/.venv/bin/python /home/pi/git/trakt-history/app.py
 Restart=always
 RestartSec=10

@@ -18,13 +18,9 @@ from urllib.parse import unquote
 APP = Flask(__name__, template_folder='templates')
 APP.secret_key = os.getenv('FLASK_SECRET', 'dev-secret')
 
-# Import scheduler
-try:
-    from scheduler import start_scheduler, stop_scheduler
-    HAS_SCHEDULER = True
-except ImportError:
-    HAS_SCHEDULER = False
-    print("Warning: APScheduler not available. Background updates disabled.")
+# NOTE: Background updates are handled by a dedicated systemd service running
+# scheduler.py (trakt-scheduler.service), independent of this web app. The web
+# app no longer starts its own scheduler to avoid running two instances.
 
 # Multi-user configuration
 PRIMARY_USER = os.getenv('PRIMARY_USER')
@@ -517,12 +513,5 @@ def refresh():
 
 
 if __name__ == '__main__':
-    # Start background scheduler for automatic updates
-    if HAS_SCHEDULER:
-        start_scheduler()
-    
-    try:
-        APP.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=os.getenv('FLASK_DEBUG', '1') == '1')
-    finally:
-        if HAS_SCHEDULER:
-            stop_scheduler()
+    # Background updates run via the dedicated trakt-scheduler.service.
+    APP.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000)), debug=os.getenv('FLASK_DEBUG', '0') == '1')

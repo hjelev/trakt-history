@@ -1,0 +1,19 @@
+[Unit]
+Description=Trakt History Update Scheduler
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/git/trakt-history
+Environment="PATH=/home/pi/git/trakt-history/.venv/bin"
+ExecStart=/home/pi/git/trakt-history/.venv/bin/python /home/pi/git/trakt-history/scheduler.py
+Restart=always
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=trakt-scheduler
+
+[Install]
+WantedBy=multi-user.target
