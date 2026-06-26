@@ -4,31 +4,39 @@
 
 The scheduler automatically updates your Trakt watch history every hour. It:
 
-1. **Runs in the background** - daemon mode, doesn't block the Flask web app
+1. **Runs as its own process** - `scheduler.py`, independent of the Flask web app
 2. **Updates all configured users** - PRIMARY_USER and any ADDITIONAL_USERS  
-3. **Logs detailed information** - to `scheduler.log` for debugging
+3. **Logs detailed information** - to the systemd journal and `scheduler.log` for debugging
 4. **Handles errors gracefully** - reports issues without crashing
+
+> **Note:** The scheduler is **not** started by the Flask web app. Running `python app.py`
+> only serves the web UI — you must run the scheduler separately (systemd service below).
 
 ## Running the Scheduler
 
-### Option 1: With Flask Web App (Recommended)
+### Option 1: As a Systemd Service (Recommended)
 
-When you run the Flask app, the scheduler starts automatically:
+On Linux, run the scheduler as a dedicated systemd service so it survives reboots and restarts
+on failure. See the **Automatic Hourly Updates (Scheduler Service)** section in
+[README.md](README.md) for the full setup; in short:
 
 ```bash
-python app.py
-```
+cp trakt-scheduler.service.example trakt-scheduler.service
+nano trakt-scheduler.service        # set User= and the /home/<user>/... paths
 
-The scheduler will run in the background and start your first update 1 hour after app startup.
+sudo cp trakt-scheduler.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now trakt-scheduler.service
+sudo systemctl status trakt-scheduler.service
 
-Check the log:
-```bash
+# Check logs
+sudo journalctl -u trakt-scheduler.service -f
 tail -f scheduler.log
 ```
 
 ### Option 2: Standalone Scheduler
 
-To run the scheduler independently (for debugging or manual testing):
+To run the scheduler in the foreground (for debugging or manual testing):
 
 ```bash
 python scheduler.py
@@ -38,28 +46,19 @@ Output will appear in both the console and in `scheduler.log`.
 
 Press `Ctrl+C` to stop.
 
-### Option 3: As a Systemd Service
-
-If deployed on Linux, you can use the provided service file:
-
-```bash
-sudo systemctl start trakt-app
-sudo systemctl status trakt-app
-
-# Check logs
-journalctl -u trakt-app -f
-tail -f /path/to/trakt/scheduler.log
-```
-
 ## Troubleshooting
 
 ### Check if Scheduler is Running
 
 ```bash
-# In Python shell
-from scheduler import start_scheduler
-scheduler = start_scheduler()
-print(scheduler.get_jobs())
+# Is the systemd service active?
+sudo systemctl status trakt-scheduler.service
+
+# Recent service output
+sudo journalctl -u trakt-scheduler.service -n 50
+
+# Diagnose configuration (imports, users, paths, log)
+python verify_scheduler.py
 ```
 
 ### View Detailed Logs
@@ -110,9 +109,9 @@ python scripts/update_trakt_local.py --user masoko --limit 5 --no-enrichment
 
 **Issue**: Updates taking too long
 - **Note**: First run may take 5-15 minutes to fetch posters/cast
-- **Subsequent runs**: Should be faster (respects cache)
-- **Primary user**: Forced refresh every hour (for ratings)
-- **Additional users**: Cached mode (faster, use `--force` to refresh)
+- **Subsequent runs**: Should be faster (incremental, respects cache)
+- **All users**: Incremental updates each hour; ratings are always fetched fresh
+- **Manual full refresh**: run the update script with `--force` if needed
 
 ## Configuration
 
@@ -131,8 +130,8 @@ The scheduler updates:
 ## Performance Notes
 
 - **Schedule**: Every 1 hour
-- **Primary user**: Always forced refresh (--force flag) to get latest ratings
-- **Other users**: Cached mode (respects 1-hour cache to avoid redundant API calls)
+- **All users**: Incremental updates (no `--force`) to stay fast and avoid timeouts
+- **Ratings**: Always fetched fresh on every run (the ratings API is fast)
 - **Timeout**: 10 minutes per user
 - **Logs**: DEBUG level logging to `scheduler.log`
 

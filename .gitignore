@@ -35,4 +35,6 @@ _data/
 .DS_Store
 Thumbs.db
 
+# Service files (copy from the .example templates, then edit)
 trakt-app.service
+trakt-scheduler.service

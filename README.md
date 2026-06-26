@@ -222,6 +222,70 @@ sudo systemctl stop trakt-app.service
 sudo systemctl disable trakt-app.service
 ```
 
+## ⏰ Automatic Hourly Updates (Scheduler Service)
+
+The scheduler (`scheduler.py`) runs `scripts/update_trakt_local.py` once per hour for your
+`PRIMARY_USER` and each of your `ADDITIONAL_USERS`, keeping your local history fresh without
+manual refreshes. It runs as its **own** systemd service, independent of `trakt-app.service` —
+you can run either or both. Output goes to the systemd journal and to `scheduler.log`.
+
+### 1. Set the users to update in `.env`
+
+```bash
+PRIMARY_USER=your_username        # account updated by default
+ADDITIONAL_USERS=friend1,friend2  # optional, comma-separated public Trakt users
+```
+
+### 2. Copy and Configure the Service File
+
+```bash
+# Copy the example service file
+cp trakt-scheduler.service.example trakt-scheduler.service
+
+# Edit with your username and paths
+nano trakt-scheduler.service
+```
+
+Set `User=` and the three `/home/<user>/...` paths to match your installation, exactly as you
+did for `trakt-app.service`.
+
+### 3. Install and Enable Service
+
+```bash
+# Copy service file to systemd
+sudo cp trakt-scheduler.service /etc/systemd/system/
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable service to start on boot
+sudo systemctl enable trakt-scheduler.service
+
+# Start the service now
+sudo systemctl start trakt-scheduler.service
+
+# Check status
+sudo systemctl status trakt-scheduler.service
+```
+
+### 4. Service Management
+
+```bash
+# Follow the service logs (live)
+sudo journalctl -u trakt-scheduler.service -f
+
+# Follow the detailed scheduler log
+tail -f scheduler.log
+
+# Restart / stop / disable
+sudo systemctl restart trakt-scheduler.service
+sudo systemctl stop trakt-scheduler.service
+sudo systemctl disable trakt-scheduler.service
+```
+
+> **Note:** The first update runs ~1 hour after the service starts. To update immediately,
+> run `python scripts/update_trakt_local.py --user <name>` or click **🔄 Refresh** in the web UI.
+
 ## 📁 Project Structure
 
 ```
@@ -229,11 +293,13 @@ trakt-history/
 ├── app.py                          # Main Flask application
 ├── authenticate.py                 # Trakt OAuth authentication script
 ├── main.py                         # Trakt API wrapper module
+├── scheduler.py                    # Hourly auto-update scheduler
 ├── requirements.txt                # Python dependencies
 ├── .env.example                    # Environment variables template
 ├── .env                            # Your environment config (not in git)
 ├── trakt.json                      # OAuth token (generated, not in git)
-├── trakt-app.service.example       # systemd service template
+├── trakt-app.service.example       # Web app systemd service template
+├── trakt-scheduler.service.example # Scheduler systemd service template
 ├── templates/
 │   └── index.html                  # Main web interface
 ├── scripts/
@@ -278,6 +344,10 @@ FLASK_DEBUG=1                # Enable debug mode (0 for production)
 
 # Caching
 CACHE_DURATION=3600          # Cache duration in seconds (1 hour)
+
+# Scheduler (used by trakt-scheduler.service)
+PRIMARY_USER=your_username   # account updated by default
+ADDITIONAL_USERS=user1,user2 # optional, comma-separated public Trakt users
 
 # RatingPosterDB (optional)
 RPDB_API_KEY=your_key        # For poster thumbnails
