@@ -671,9 +671,11 @@
       </div>
       <div class="stats-footer">
         <span>Generated {{ data.generated_at or 'N/A' }}</span>
-        <span>{{ data.generation_time }}s</span>
+        {% if data.generation_time %}<span>{{ data.generation_time }}s</span>{% endif %}
         {% if ratings_note %}<span>{{ ratings_note }}</span>{% endif %}
         <a href="{{ url_for('refresh', user=selected_user) }}">Refresh data</a>
+        <a href="https://github.com/hjelev/trakt-history" target="_blank" rel="noopener">GitHub</a>
+        <a href="https://masoko.net" target="_blank" rel="noopener">masoko.net</a>
       </div>
     </section>
     {% endif %}
