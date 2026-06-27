@@ -29,6 +29,7 @@ if not PRIMARY_USER:
 ADDITIONAL_USERS_STR = os.getenv('ADDITIONAL_USERS', '')
 ADDITIONAL_USERS = [u.strip() for u in ADDITIONAL_USERS_STR.split(',') if u.strip()]
 ALL_USERS = [PRIMARY_USER] + ADDITIONAL_USERS
+ALL_USERS_KEY = 'all'  # sentinel selecting the combined cross-profile view
 
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data'))
 CACHE_DURATION = int(os.getenv('CACHE_DURATION', 3600))
@@ -50,13 +51,14 @@ def clean_url_filter(endpoint, **kwargs):
         'media': 'both',
         'period': 'all',
         'view': 'gallery',
-        'user': PRIMARY_USER
+        'user': ALL_USERS_KEY
     }
 
-    # If a non-primary user is selected, prefix the URL with /<username>
+    # The combined view is the default; a specific user prefixes the URL with
+    # /<username> (including the primary user).
     user_segment = None
     user_value = kwargs.get('user')
-    if user_value and user_value != PRIMARY_USER:
+    if user_value and user_value != ALL_USERS_KEY:
         user_segment = quote(str(user_value), safe='')
     
     for param in param_order:
@@ -109,6 +111,28 @@ def load_data(username: str = None):
         return json.load(f)
 
 
+def load_all_data():
+    """Load and merge history across all users into a single, owner-tagged feed."""
+    merged = []
+    generated_ats = []
+    for u in ALL_USERS:
+        d = load_data(u)
+        for it in d.get('items', []):
+            it = dict(it)        # copy so we don't mutate cached dicts
+            it['_user'] = u      # tag owner for display
+            merged.append(it)
+        if d.get('generated_at'):
+            generated_ats.append(d['generated_at'])
+    # most-recent first; watched_at "YYYY-MM-DD HH:MM" sorts lexically
+    merged.sort(key=lambda it: it.get('watched_at') or '', reverse=True)
+    return {
+        'generated_at': max(generated_ats) if generated_ats else None,
+        'generation_time': None,
+        'count': len(merged),
+        'items': merged,
+    }
+
+
 @APP.route('/')
 @APP.route('/<path:params>')
 def index(params=None):
@@ -120,7 +144,7 @@ def index(params=None):
         known_keys = {'view', 'user', 'genre', 'actor', 'search', 'media', 'period', 'year', 'rated', 'page', 'per_page'}
 
         # Support /<username> and /<username>/param/value
-        if parts and parts[0] in ALL_USERS and parts[0] not in known_keys:
+        if parts and (parts[0] in ALL_USERS or parts[0] == ALL_USERS_KEY) and parts[0] not in known_keys:
             args['user'] = parts[0]
             parts = parts[1:]
 
@@ -136,12 +160,12 @@ def index(params=None):
         if key not in args:
             args[key] = request.args.get(key)
     
-    # Get selected user (default to primary user)
-    selected_user = args.get('user', PRIMARY_USER)
-    if selected_user not in ALL_USERS:
-        selected_user = PRIMARY_USER
-    
-    data = load_data(selected_user)
+    # Get selected user (default to the combined cross-profile view)
+    selected_user = args.get('user', ALL_USERS_KEY)
+    if selected_user != ALL_USERS_KEY and selected_user not in ALL_USERS:
+        selected_user = ALL_USERS_KEY
+
+    data = load_all_data() if selected_user == ALL_USERS_KEY else load_data(selected_user)
     # pagination params
     try:
         page = max(1, int(args.get('page', 1)))

@@ -242,10 +242,18 @@
       padding: 9px 10px 30px; z-index: 1; pointer-events: none;
       display: flex; align-items: flex-start; gap: 8px; justify-content: space-between;
     }
+    .card-title-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px }
     .card-title-overlay {
-      flex: 1; min-width: 0;
+      min-width: 0;
       font-size: 0.8rem; font-weight: 600; color: #fff; line-height: 1.22;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .card-user-overlay {
+      align-self: flex-start;
+      font-size: 0.65rem; font-weight: 600; color: #fff;
+      background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
+      padding: 2px 7px; border-radius: var(--radius-full);
+      letter-spacing: 0.02em;
     }
     .rating-pill {
       flex: 0 0 auto; align-self: flex-start;
@@ -379,6 +387,9 @@
       {% if all_users|length > 1 %}
       <select class="user-select" aria-label="Switch user"
         onchange="if(this.selectedOptions[0]&&this.selectedOptions[0].dataset.url)window.location=this.selectedOptions[0].dataset.url;">
+        <option value="all"
+          data-url="{{ clean_url('index', user='all', view=view_mode, page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}"
+          {% if selected_user == 'all' %}selected{% endif %}>All</option>
         {% for u in all_users %}
         <option value="{{ u }}"
           data-url="{{ clean_url('index', user=u, view=view_mode, page=1, per_page=data.per_page, genre=data.filter_genre, actor=data.filter_actor, search=data.filter_search, media=data.filter_media, period=data.filter_period, year=data.filter_year, rated=data.filter_rated) }}"
@@ -517,11 +528,14 @@
                 {% endif %}
                 <div class="card-gradient"></div>
                 <div class="card-overlay">
-                  {% if it.type == 'episode' and it.show and it.show.title %}
-                    <div class="card-title-overlay">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</div>
-                  {% else %}
-                    <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
-                  {% endif %}
+                  <div class="card-title-col">
+                    {% if it.type == 'episode' and it.show and it.show.title %}
+                      <div class="card-title-overlay">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</div>
+                    {% else %}
+                      <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
+                    {% endif %}
+                    {% if selected_user == 'all' and it._user %}<div class="card-user-overlay">{{ it._user }}</div>{% endif %}
+                  </div>
                   {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
                 </div>
               </div>
@@ -569,11 +583,14 @@
             {% endif %}
             <div class="card-gradient"></div>
             <div class="card-overlay">
-              {% if it.type == 'episode' and it.show and it.show.title %}
-                <div class="card-title-overlay">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</div>
-              {% else %}
-                <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
-              {% endif %}
+              <div class="card-title-col">
+                {% if it.type == 'episode' and it.show and it.show.title %}
+                  <div class="card-title-overlay">{{ it.show.title }}{% if it.year %} ({{ it.year }}){% endif %} S{{ it.season or '?' }}E{{ it.number or '?' }}</div>
+                {% else %}
+                  <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
+                {% endif %}
+                {% if selected_user == 'all' and it._user %}<div class="card-user-overlay">{{ it._user }}</div>{% endif %}
+              </div>
               {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
             </div>
           </div>
