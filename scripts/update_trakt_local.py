@@ -3,7 +3,7 @@ import os
 import json
 import importlib.util
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 import urllib.parse
 import requests
 import argparse
@@ -98,45 +98,25 @@ def main():
     if not authed:
         raise SystemExit(f'Authentication failed; ensure trakt.json exists in {TRAKT_DIR}')
 
-    # Check for existing cache to enable incremental updates
+    # Load existing cache so enrichment can stay incremental (only genuinely-new
+    # items get re-enriched downstream). We intentionally do NOT use a watched_at
+    # `start_at` filter: Trakt's /sync/history filters by watched_at only, so a
+    # movie marked watched on its (old) release date but added recently would be
+    # filtered out and never sync. Fetching the full history every run catches
+    # these back-dated additions; the expensive enrichment remains incremental.
     start_at = None
     cached_items = []
     if os.path.exists(RAW_PATH) and not args.force:
         try:
             with open(RAW_PATH, 'r') as f:
                 cached_items = json.load(f)
-            
-            # Find the most recent watched_at timestamp
             if cached_items:
-                timestamps = []
-                for item in cached_items:
-                    watched = item.get('watched_at_iso') or item.get('watched_at')
-                    if watched:
-                        try:
-                            if isinstance(watched, str):
-                                # Parse ISO format
-                                ts = datetime.fromisoformat(watched.replace('Z', '+00:00'))
-                            else:
-                                ts = watched
-                            timestamps.append(ts)
-                        except Exception:
-                            pass
-                
-                if timestamps:
-                    latest = max(timestamps)
-                    # Add 1 second to avoid re-fetching the last item (Trakt's start_at is inclusive)
-                    start_at = latest + timedelta(seconds=1)
-                    print(f"Found {len(cached_items)} cached items, latest watched: {latest.isoformat()}")
-                    print("Fetching only new items since last update (incremental mode)...")
+                print(f"Found {len(cached_items)} cached items; enrichment will run only for new items.")
         except Exception as e:
-            print(f"Could not read cache for incremental update: {e}")
+            print(f"Could not read cache: {e}")
             cached_items = []
-            start_at = None
 
-    if start_at:
-        print(f"Fetching new items watched after {start_at.isoformat()}...")
-    else:
-        print("Fetching full watch history from Trakt API...")
+    print("Fetching full watch history from Trakt API...")
     
     try:
         # Use extended='full' to get all metadata including images
@@ -180,11 +160,7 @@ def main():
                     'limit': 100,
                     'extended': 'full'
                 }
-                
-                if start_at and page == 1:
-                    # For incremental updates
-                    params['start_at'] = start_at.isoformat()
-                
+
                 response = requests.get(url, headers=headers, params=params, timeout=60)
                 
                 if response.status_code == 401:
@@ -242,11 +218,7 @@ def main():
                     'limit': 100,
                     'extended': 'full'
                 }
-                
-                if start_at and page == 1:
-                    # For incremental updates
-                    params['start_at'] = start_at.isoformat()
-                
+
                 response = requests.get(url, headers=headers, params=params, timeout=60)
                 
                 if response.status_code == 404:
@@ -532,8 +504,9 @@ def main():
 
     print(f"After deduplication: {len(deduped)} items (removed {len(history) - len(deduped)} duplicates)")
 
-    # Exit early if no new items - cache is already up to date
-    if start_at and len(deduped) == len(cached_items):
+    # Note when nothing changed - enrichment will be skipped (no new items),
+    # but ratings are still refreshed and output is rewritten below.
+    if cached_items and len(deduped) == len(cached_items):
         print('\nNo new items found since last update.')
         print('Cache is already up to date for history; will still refresh ratings cache.')
 
