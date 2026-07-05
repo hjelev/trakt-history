@@ -41,6 +41,81 @@ if not PRIMARY_USER:
 
 print(f"update_trakt_local.py: using TRAKT_DIR={TRAKT_DIR}, PRIMARY_USER={PRIMARY_USER}")
 
+def fetch_user_ratings(username: str, headers: dict) -> dict:
+    """Fetch a user's ratings from Trakt.
+
+    Uses the authenticated sync/ratings endpoint for PRIMARY_USER, and the
+    public/OAuth-optional users/{id}/ratings endpoint for everyone else.
+    Returns a dict keyed by (item_type, trakt_id) -> rating, or {} (without
+    raising) if the ratings profile is private/unavailable/unauthorized.
+    """
+    user_ratings = {}
+    try:
+        print(f"  Fetching ratings for {username} via direct Trakt API...")
+        all_ratings = []
+        page = 1
+        while True:
+            if username == PRIMARY_USER:
+                url = 'https://api.trakt.tv/sync/ratings'
+            else:
+                url = f'https://api.trakt.tv/users/{username}/ratings'
+            params = {
+                'page': page,
+                'limit': 100,
+                'extended': 'full'
+            }
+            response = requests.get(url, headers=headers, params=params, timeout=30)
+            if response.status_code in (401, 403, 404):
+                print(f"  Ratings private or unavailable for {username} (HTTP {response.status_code}), skipping")
+                return {}
+            if response.status_code != 200:
+                raise SystemExit(f'Ratings API error {response.status_code}: {response.text}')
+
+            items = response.json()
+            if not items:
+                break
+            all_ratings.extend(items)
+
+            if 'X-Pagination-Page-Count' in response.headers:
+                total_pages = int(response.headers['X-Pagination-Page-Count'])
+                if page >= total_pages:
+                    break
+            else:
+                break
+
+            page += 1
+
+        for r in all_ratings:
+            item_type = r.get('type')
+            rating_value = r.get('rating')
+            if not item_type or rating_value is None:
+                continue
+
+            if item_type == 'movie':
+                trakt_id = (r.get('movie') or {}).get('ids', {}).get('trakt')
+            elif item_type == 'show':
+                trakt_id = (r.get('show') or {}).get('ids', {}).get('trakt')
+            elif item_type == 'episode':
+                trakt_id = (r.get('episode') or {}).get('ids', {}).get('trakt')
+            else:
+                trakt_id = None
+
+            if trakt_id:
+                try:
+                    user_ratings[(item_type, trakt_id)] = int(rating_value)
+                except (ValueError, TypeError):
+                    pass
+
+        print(f"  Loaded {len(user_ratings)} user ratings for {username} from API")
+    except SystemExit:
+        raise
+    except Exception as e:
+        print(f"  Warning: Could not fetch user ratings for {username} via API: {e}")
+        import traceback
+        traceback.print_exc()
+    return user_ratings
+
+
 def get_user_paths(username: str = None):
     """Get raw and output paths for a user. If username is None, uses primary user."""
     if username is None:
@@ -266,86 +341,11 @@ def main():
         print("WARNING: No items fetched from Trakt API")
         history_objs = []
     
-    # Fetch user ratings (one API call for all ratings) - only for primary user
+    # Fetch user ratings for this user (primary uses authenticated sync/ratings,
+    # additional users use the public/OAuth-optional users/{id}/ratings endpoint)
     print("\n=== Fetching user ratings ===")
-    user_ratings = {}
-    if username == PRIMARY_USER:
-        # Always fetch ratings via HTTP API for reliability
-        try:
-            print("  Fetching ratings via direct Trakt API...")
-            token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
-            access_token = None
-            if os.path.exists(token_file_path):
-                with open(token_file_path, 'r') as f:
-                    token_data = json.load(f)
-                    access_token = token_data.get('access_token')
+    user_ratings = fetch_user_ratings(username, headers)
 
-            headers = {
-                'Content-Type': 'application/json',
-                'trakt-api-version': '2',
-                'trakt-api-key': trakt_main.CLIENT_ID,
-            }
-            if access_token:
-                headers['Authorization'] = f'Bearer {access_token}'
-
-            all_ratings = []
-            page = 1
-            while True:
-                url = 'https://api.trakt.tv/sync/ratings'
-                params = {
-                    'page': page,
-                    'limit': 100,
-                    'extended': 'full'
-                }
-                response = requests.get(url, headers=headers, params=params, timeout=30)
-                if response.status_code == 401:
-                    raise SystemExit('Authentication failed for ratings - check token in trakt.json')
-                if response.status_code != 200:
-                    raise SystemExit(f'Ratings API error {response.status_code}: {response.text}')
-
-                items = response.json()
-                if not items:
-                    break
-                all_ratings.extend(items)
-
-                if 'X-Pagination-Page-Count' in response.headers:
-                    total_pages = int(response.headers['X-Pagination-Page-Count'])
-                    if page >= total_pages:
-                        break
-                else:
-                    break
-
-                page += 1
-
-            for r in all_ratings:
-                item_type = r.get('type')
-                rating_value = r.get('rating')
-                if not item_type or rating_value is None:
-                    continue
-
-                if item_type == 'movie':
-                    trakt_id = (r.get('movie') or {}).get('ids', {}).get('trakt')
-                elif item_type == 'show':
-                    trakt_id = (r.get('show') or {}).get('ids', {}).get('trakt')
-                elif item_type == 'episode':
-                    trakt_id = (r.get('episode') or {}).get('ids', {}).get('trakt')
-                else:
-                    trakt_id = None
-
-                if trakt_id:
-                    try:
-                        user_ratings[(item_type, trakt_id)] = int(rating_value)
-                    except (ValueError, TypeError):
-                        pass
-
-            print(f"  Loaded {len(user_ratings)} user ratings from API")
-        except Exception as e:
-            print(f"  Warning: Could not fetch user ratings via API: {e}")
-            import traceback
-            traceback.print_exc()
-    else:
-        print(f"  Skipping ratings for non-primary user {username}")
-    
     history = []
     seen = 0
     print(f"\nProcessing history items...")
@@ -370,9 +370,7 @@ def main():
             if 'watched_at' in d:
                 d['watched_at_iso'] = d['watched_at']
             
-            # For non-primary users, we don't fetch ratings (would need their auth)
-            # They can set up their own instance if they want ratings
-            if username == PRIMARY_USER and user_ratings:
+            if user_ratings:
                 if d.get('force_type') == 'movie':
                     m = d.get('movie') or {}
                     trakt_id = (m.get('ids') or {}).get('trakt') or (d.get('ids') or {}).get('trakt')
@@ -530,19 +528,18 @@ def main():
 
     # Build episode->show mapping from all raw items so cached items can be updated each refresh
     episode_to_show = {}
-    if username == PRIMARY_USER:
-        for it in deduped:
-            if _raw_item_type(it) != 'episode':
-                continue
-            ep_ids = _raw_item_ids(it, 'episode')
-            ep_trakt_id = (ep_ids or {}).get('trakt')
-            show = it.get('show') or {}
-            show_trakt_id = (show.get('ids') or {}).get('trakt') if isinstance(show, dict) else None
-            if ep_trakt_id and show_trakt_id:
-                episode_to_show[ep_trakt_id] = show_trakt_id
+    for it in deduped:
+        if _raw_item_type(it) != 'episode':
+            continue
+        ep_ids = _raw_item_ids(it, 'episode')
+        ep_trakt_id = (ep_ids or {}).get('trakt')
+        show = it.get('show') or {}
+        show_trakt_id = (show.get('ids') or {}).get('trakt') if isinstance(show, dict) else None
+        if ep_trakt_id and show_trakt_id:
+            episode_to_show[ep_trakt_id] = show_trakt_id
 
     def _apply_rating_to_item(item):
-        if username != PRIMARY_USER or not user_ratings:
+        if not user_ratings:
             return
         item_type = item.get('type')
         trakt_id = (item.get('ids') or {}).get('trakt')
@@ -1192,7 +1189,7 @@ def main():
 
     # Normalize newly processed items
     simplified_new = [normalize(i) for i in history]
-    if username == PRIMARY_USER and user_ratings:
+    if user_ratings:
         for item in simplified_new:
             _apply_rating_to_item(item)
     
@@ -1228,7 +1225,7 @@ def main():
                     key = (cached_item.get('type'), key_id, watched_day)
                     
                     if key not in new_item_keys:
-                        if username == PRIMARY_USER and user_ratings:
+                        if user_ratings:
                             _apply_rating_to_item(cached_item)
                         simplified.append(cached_item)
                 
@@ -1240,7 +1237,7 @@ def main():
     
     # Refresh ratings on all processed items (new + cached) every run
     # Apply ratings twice to ensure they're picked up even if trakt ID lookup fails on first pass
-    if username == PRIMARY_USER and user_ratings:
+    if user_ratings:
         ratings_updated = 0
         for item in simplified:
             old_rating = item.get('rating')

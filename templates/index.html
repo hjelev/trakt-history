@@ -240,7 +240,7 @@
     .card-overlay {
       position: absolute; top: 0; left: 0; right: 0;
       padding: 9px 10px 30px; z-index: 1; pointer-events: none;
-      display: flex; align-items: flex-start; gap: 8px; justify-content: space-between;
+      display: flex; align-items: flex-start; gap: 8px;
     }
     .card-title-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px }
     .card-title-overlay {
@@ -248,15 +248,15 @@
       font-size: 0.8rem; font-weight: 600; color: #fff; line-height: 1.22;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
+    .card-meta-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
     .card-user-overlay {
-      align-self: flex-start;
       font-size: 0.65rem; font-weight: 600; color: #fff;
       background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
       padding: 2px 7px; border-radius: var(--radius-full);
       letter-spacing: 0.02em;
     }
     .rating-pill {
-      flex: 0 0 auto; align-self: flex-start;
+      flex: 0 0 auto;
       background: rgba(0,0,0,0.72); color: #fff;
       padding: 3px 8px; border-radius: var(--radius-full);
       font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
@@ -534,9 +534,13 @@
                     {% else %}
                       <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
                     {% endif %}
-                    {% if selected_user == 'all' and it._user %}<div class="card-user-overlay">{{ it._user }}</div>{% endif %}
+                    {% if (selected_user == 'all' and it._user) or it.rating is not none %}
+                    <div class="card-meta-row">
+                      {% if selected_user == 'all' and it._user %}<span class="card-user-overlay">{{ it._user }}</span>{% endif %}
+                      {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
+                    </div>
+                    {% endif %}
                   </div>
-                  {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
                 </div>
               </div>
               <div class="card-foot">
@@ -589,9 +593,13 @@
                 {% else %}
                   <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
                 {% endif %}
-                {% if selected_user == 'all' and it._user %}<div class="card-user-overlay">{{ it._user }}</div>{% endif %}
+                {% if (selected_user == 'all' and it._user) or it.rating is not none %}
+                <div class="card-meta-row">
+                  {% if selected_user == 'all' and it._user %}<span class="card-user-overlay">{{ it._user }}</span>{% endif %}
+                  {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
+                </div>
+                {% endif %}
               </div>
-              {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
             </div>
           </div>
           <div class="card-foot">
@@ -672,7 +680,6 @@
       <div class="stats-footer">
         <span>Generated {{ data.generated_at or 'N/A' }}</span>
         {% if data.generation_time %}<span>{{ data.generation_time }}s</span>{% endif %}
-        {% if ratings_note %}<span>{{ ratings_note }}</span>{% endif %}
         <a href="{{ url_for('refresh', user=selected_user) }}">Refresh data</a>
         <a href="https://github.com/hjelev/trakt-history" target="_blank" rel="noopener">GitHub</a>
         <a href="https://masoko.net" target="_blank" rel="noopener">masoko.net</a>

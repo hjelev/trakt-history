@@ -447,12 +447,8 @@ def index(params=None):
     stats['avg_rating'] = round(sum(ratings) / len(ratings), 1) if ratings else None
     stats['rated_count'] = len(ratings)
 
-    ratings_note = None
-    if selected_user != PRIMARY_USER:
-        ratings_note = f"Ratings are only available for primary user ({PRIMARY_USER})."
-    
     return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats,
-                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, ratings_note=ratings_note, view_mode=view_mode)
+                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, view_mode=view_mode)
 
 
 @APP.route('/api/history')
