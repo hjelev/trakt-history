@@ -356,7 +356,7 @@ RPDB_API_KEY=your_key        # For poster thumbnails
 ## 🎨 Features in Detail
 
 ### Personal Ratings
-Your personal ratings from Trakt.tv are displayed on each poster with a ⭐ badge in the top-right corner. Only items you've rated will show the badge.
+Ratings from Trakt.tv are collected for every configured user — `PRIMARY_USER` and each of `ADDITIONAL_USERS` — provided that user's Trakt ratings are public. Each item's ⭐ badge is shown next to that user's name badge in the "All" view. Only items that user has rated will show the badge.
 
 ### Poster Thumbnails
 High-quality poster images are loaded directly from RatingPosterDB CDN when you provide an API key. The app generates optimized image URLs for fast loading without local storage.
