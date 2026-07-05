@@ -72,11 +72,20 @@ def run_update_for_user(username):
             logger.info(f"✓ Update completed for {username}")
             # Log output for debugging
             if result.stdout:
-                # Log last 10 lines
                 lines = result.stdout.strip().split('\n')
+                # Surface ratings outcomes and problems at INFO regardless of
+                # where they appear in stdout
+                for line in lines:
+                    if any(kw in line for kw in ('Ratings', 'Loaded', 'Warning', 'Error')):
+                        logger.info(f"  {line.strip()}")
+                # Log last 10 lines
                 for line in lines[-10:]:
                     if line.strip():
                         logger.debug(f"  {line}")
+            # Tracebacks from swallowed exceptions (e.g. ratings fetch) land on
+            # stderr even when the script exits 0 — don't discard them
+            if result.stderr and result.stderr.strip():
+                logger.warning(f"STDERR (rc=0) for {username}:\n{result.stderr.strip()}")
         else:
             logger.error(f"✗ Update failed for {username}")
             logger.error(f"Return code: {result.returncode}")
@@ -115,13 +124,16 @@ def start_scheduler():
         return None
     
     try:
-        # Schedule update every hour
+        # Schedule update every hour; next_run_time makes the first run happen
+        # immediately on service start instead of a full hour later (restarts
+        # used to keep pushing the next run out by another hour)
         scheduler.add_job(
             update_all_users,
             trigger=IntervalTrigger(hours=1),
             id='update_all_users',
             name='Update Trakt history for all users',
-            replace_existing=True
+            replace_existing=True,
+            next_run_time=datetime.now()
         )
         logger.info("✓ Job added to scheduler")
     except Exception as e:

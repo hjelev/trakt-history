@@ -66,7 +66,7 @@ def fetch_user_ratings(username: str, headers: dict) -> dict:
             }
             response = requests.get(url, headers=headers, params=params, timeout=30)
             if response.status_code in (401, 403, 404):
-                print(f"  Ratings private or unavailable for {username} (HTTP {response.status_code}), skipping")
+                print(f"  Ratings private or unavailable for {username} (HTTP {response.status_code} from {url}), skipping")
                 return {}
             if response.status_code != 200:
                 raise SystemExit(f'Ratings API error {response.status_code}: {response.text}')
@@ -1246,6 +1246,14 @@ def main():
                 ratings_updated += 1
         if ratings_updated > 0:
             print(f"\n✓ Updated ratings on {ratings_updated} items during merge")
+
+    # Ratings summary printed near the end of stdout so the scheduler's
+    # last-lines log capture always records the outcome of the ratings fetch
+    rated_count = sum(1 for item in simplified if item.get('rating') is not None)
+    if user_ratings:
+        print(f"Ratings: loaded {len(user_ratings)} from API for {username}, {rated_count}/{len(simplified)} items rated in output")
+    else:
+        print(f"Ratings: NONE loaded from API for {username}, {rated_count}/{len(simplified)} items rated in output")
 
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
     
