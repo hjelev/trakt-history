@@ -249,6 +249,7 @@
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
     .card-meta-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
+    .watcher-group { display: inline-flex; align-items: center; gap: 4px }
     .card-user-overlay {
       font-size: 0.65rem; font-weight: 600; color: #fff;
       background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
@@ -534,7 +535,16 @@
                     {% else %}
                       <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
                     {% endif %}
-                    {% if (selected_user == 'all' and it._user) or it.rating is not none %}
+                    {% if it.watchers %}
+                    <div class="card-meta-row">
+                      {% for w in it.watchers %}
+                      <span class="watcher-group" title="watched {{ w.watched_at }}">
+                        <span class="card-user-overlay">{{ w.user }}{% if w.plays > 1 %} ×{{ w.plays }}{% endif %}</span>
+                        {% if w.rating is not none %}<span class="rating-pill">★ {{ w.rating }}</span>{% endif %}
+                      </span>
+                      {% endfor %}
+                    </div>
+                    {% elif (selected_user == 'all' and it._user) or it.rating is not none %}
                     <div class="card-meta-row">
                       {% if selected_user == 'all' and it._user %}<span class="card-user-overlay">{{ it._user }}</span>{% endif %}
                       {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
@@ -593,7 +603,16 @@
                 {% else %}
                   <div class="card-title-overlay">{% if it.type == 'episode' %}{{ it.title }} — S{{ it.season or '?' }}E{{ it.number or '?' }}{% else %}{{ it.title }}{% if it.year %} ({{ it.year }}){% endif %}{% endif %}</div>
                 {% endif %}
-                {% if (selected_user == 'all' and it._user) or it.rating is not none %}
+                {% if it.watchers %}
+                <div class="card-meta-row">
+                  {% for w in it.watchers %}
+                  <span class="watcher-group" title="watched {{ w.watched_at }}">
+                    <span class="card-user-overlay">{{ w.user }}{% if w.plays > 1 %} ×{{ w.plays }}{% endif %}</span>
+                    {% if w.rating is not none %}<span class="rating-pill">★ {{ w.rating }}</span>{% endif %}
+                  </span>
+                  {% endfor %}
+                </div>
+                {% elif (selected_user == 'all' and it._user) or it.rating is not none %}
                 <div class="card-meta-row">
                   {% if selected_user == 'all' and it._user %}<span class="card-user-overlay">{{ it._user }}</span>{% endif %}
                   {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}

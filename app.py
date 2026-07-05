@@ -133,6 +133,41 @@ def load_all_data():
     }
 
 
+def group_watchers(items):
+    """Collapse duplicate (type, trakt-id) entries into one card per title.
+
+    Expects a watched_at-desc-sorted owner-tagged list, so the first
+    occurrence (most recent watch) becomes the representative card.
+    Adds it['watchers'] = [{'user', 'rating', 'watched_at', 'plays'}, ...],
+    one entry per user, most-recent watcher first.
+    """
+    grouped = []
+    by_key = {}
+    for it in items:
+        tid = (it.get('ids') or {}).get('trakt')
+        # items without a trakt id get a unique key and never merge
+        key = (it.get('type'), tid) if tid else ('_nogroup', id(it))
+        rep = by_key.get(key)
+        if rep is None:
+            rep = dict(it)
+            rep['watchers'] = []
+            by_key[key] = rep
+            grouped.append(rep)
+        w = next((w for w in rep['watchers'] if w['user'] == it.get('_user')), None)
+        if w is None:
+            rep['watchers'].append({
+                'user': it.get('_user'),
+                'rating': it.get('rating'),
+                'watched_at': it.get('watched_at'),
+                'plays': 1,
+            })
+        else:
+            w['plays'] += 1
+            if w['rating'] is None and it.get('rating') is not None:
+                w['rating'] = it.get('rating')
+    return grouped
+
+
 @APP.route('/')
 @APP.route('/<path:params>')
 def index(params=None):
@@ -314,6 +349,12 @@ def index(params=None):
     if rated_only == 'yes':
         items_all = [it for it in items_all if it.get('rating') is not None]
 
+    # Combined view: one card per title, carrying every user's watch info.
+    # Runs after the filters so they keep per-watch semantics; the calendar
+    # is a per-day diary, so it groups per date bucket below instead.
+    if selected_user == ALL_USERS_KEY and view_mode != 'calendar':
+        items_all = group_watchers(items_all)
+
     total = len(items_all)
     total_pages = max(1, ceil(total / per_page))
     if page > total_pages:
@@ -370,7 +411,11 @@ def index(params=None):
         end = start + per_page
         paginated_dates = sorted_dates[start:end]
         
-        calendar_items = {date: calendar_items_dict[date] for date in paginated_dates}
+        calendar_items = {
+            date: (group_watchers(calendar_items_dict[date])
+                   if selected_user == ALL_USERS_KEY else calendar_items_dict[date])
+            for date in paginated_dates
+        }
     
     paged = {
         'generated_at': _format_generated_at(data.get('generated_at')),
