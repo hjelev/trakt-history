@@ -264,7 +264,7 @@
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
     }
     .card-meta-row { display: flex; align-items: center; gap: 6px; flex-wrap: wrap }
-    .watcher-group { display: inline-flex; align-items: center; gap: 4px }
+    .watcher-group { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap }
     .card-user-overlay {
       font-size: 0.65rem; font-weight: 600; color: #fff;
       background: rgba(0,0,0,0.55); backdrop-filter: blur(6px);
@@ -279,10 +279,10 @@
       backdrop-filter: blur(6px);
     }
     .rating-widget {
-      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 1px;
+      flex: 0 0 auto; flex-basis: 100%; display: inline-flex; align-items: center; gap: 1px;
       background: rgba(0,0,0,0.72); border-radius: var(--radius-full);
       padding: 3px 6px; backdrop-filter: blur(6px);
-      pointer-events: auto;
+      pointer-events: auto; margin-top: 2px;
     }
     .rating-star {
       cursor: pointer; font-size: 0.72rem; line-height: 1; color: rgba(255,255,255,0.35);
