@@ -4,6 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{{ selected_user|capitalize }} Trakt History</title>
+  {% if session.trakt_user %}<meta name="csrf-token" content="{{ session.csrf_token }}">
+  <meta name="session-user" content="{{ session.trakt_user }}">{% endif %}
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><circle cx='12' cy='12' r='10' fill='%23e03a3a'/><polygon points='10,8 16,12 10,16' fill='%23fff'/></svg>">
   <link href="https://fonts.googleapis.com/css2?family=Inter:ital,opsz,wght@0,14..32,400;0,14..32,500;0,14..32,600;0,14..32,700&display=swap" rel="stylesheet">
   <style>
@@ -141,6 +143,19 @@
     }
     .user-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-sub) }
 
+    .session-user {
+      font-size: 0.78rem; font-weight: 600; color: var(--text-2);
+      white-space: nowrap; flex-shrink: 0;
+    }
+    .auth-link {
+      font-size: 0.78rem; font-weight: 600; color: var(--accent);
+      white-space: nowrap; flex-shrink: 0;
+      padding: 6px 12px; border-radius: var(--radius-full);
+      background: var(--accent-sub);
+      transition: background var(--t), color var(--t);
+    }
+    .auth-link:hover { background: var(--accent); color: #fff }
+
     /* === FLASH === */
     .flash-list { list-style: none; padding: 12px 0 4px; font-size: 0.83rem }
     .flash-success { color: #16a34a }
@@ -263,6 +278,18 @@
       font-size: 0.7rem; font-weight: 700; letter-spacing: 0.02em;
       backdrop-filter: blur(6px);
     }
+    .rating-widget {
+      flex: 0 0 auto; display: inline-flex; align-items: center; gap: 1px;
+      background: rgba(0,0,0,0.72); border-radius: var(--radius-full);
+      padding: 3px 6px; backdrop-filter: blur(6px);
+      pointer-events: auto;
+    }
+    .rating-star {
+      cursor: pointer; font-size: 0.72rem; line-height: 1; color: rgba(255,255,255,0.35);
+      transition: color var(--t);
+    }
+    .rating-star.filled { color: #f5c518 }
+    .rating-widget.saving { opacity: 0.5; pointer-events: none }
 
     /* === CARD FOOT === */
     .card-foot { padding: 7px 2px 0 }
@@ -397,6 +424,13 @@
           {% if selected_user == u %}selected{% endif %}>{{ u }}</option>
         {% endfor %}
       </select>
+      {% endif %}
+
+      {% if session.trakt_user %}
+      <span class="session-user">{{ session.trakt_user }}</span>
+      <a href="{{ url_for('logout') }}" class="auth-link">Log out</a>
+      {% else %}
+      <a href="{{ url_for('login') }}" class="auth-link">Log in with Trakt</a>
       {% endif %}
 
     </div>
@@ -540,14 +574,18 @@
                       {% for w in it.watchers %}
                       <span class="watcher-group" title="watched {{ w.watched_at }}">
                         <span class="card-user-overlay">{{ w.user }}{% if w.plays > 1 %} ×{{ w.plays }}{% endif %}</span>
-                        {% if w.rating is not none %}<span class="rating-pill">★ {{ w.rating }}</span>{% endif %}
+                        {% if session.trakt_user and w.user == session.trakt_user and it.type in ('movie', 'episode') and it.ids and it.ids.trakt %}
+                        <span class="rating-widget" data-type="{{ it.type }}" data-trakt-id="{{ it.ids.trakt }}" data-current="{{ w.rating or 0 }}"></span>
+                        {% elif w.rating is not none %}<span class="rating-pill">★ {{ w.rating }}</span>{% endif %}
                       </span>
                       {% endfor %}
                     </div>
-                    {% elif (selected_user == 'all' and it._user) or it.rating is not none %}
+                    {% elif (selected_user == 'all' and it._user) or it.rating is not none or (session.trakt_user and session.trakt_user == selected_user) %}
                     <div class="card-meta-row">
                       {% if selected_user == 'all' and it._user %}<span class="card-user-overlay">{{ it._user }}</span>{% endif %}
-                      {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
+                      {% if session.trakt_user and session.trakt_user == selected_user and it.type in ('movie', 'episode') and it.ids and it.ids.trakt %}
+                      <span class="rating-widget" data-type="{{ it.type }}" data-trakt-id="{{ it.ids.trakt }}" data-current="{{ it.rating or 0 }}"></span>
+                      {% elif it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
                     </div>
                     {% endif %}
                   </div>
@@ -608,14 +646,18 @@
                   {% for w in it.watchers %}
                   <span class="watcher-group" title="watched {{ w.watched_at }}">
                     <span class="card-user-overlay">{{ w.user }}{% if w.plays > 1 %} ×{{ w.plays }}{% endif %}</span>
-                    {% if w.rating is not none %}<span class="rating-pill">★ {{ w.rating }}</span>{% endif %}
+                    {% if session.trakt_user and w.user == session.trakt_user and it.type in ('movie', 'episode') and it.ids and it.ids.trakt %}
+                    <span class="rating-widget" data-type="{{ it.type }}" data-trakt-id="{{ it.ids.trakt }}" data-current="{{ w.rating or 0 }}"></span>
+                    {% elif w.rating is not none %}<span class="rating-pill">★ {{ w.rating }}</span>{% endif %}
                   </span>
                   {% endfor %}
                 </div>
-                {% elif (selected_user == 'all' and it._user) or it.rating is not none %}
+                {% elif (selected_user == 'all' and it._user) or it.rating is not none or (session.trakt_user and session.trakt_user == selected_user) %}
                 <div class="card-meta-row">
                   {% if selected_user == 'all' and it._user %}<span class="card-user-overlay">{{ it._user }}</span>{% endif %}
-                  {% if it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
+                  {% if session.trakt_user and session.trakt_user == selected_user and it.type in ('movie', 'episode') and it.ids and it.ids.trakt %}
+                  <span class="rating-widget" data-type="{{ it.type }}" data-trakt-id="{{ it.ids.trakt }}" data-current="{{ it.rating or 0 }}"></span>
+                  {% elif it.rating is not none %}<span class="rating-pill">★ {{ it.rating }}</span>{% endif %}
                 </div>
                 {% endif %}
               </div>
@@ -707,5 +749,6 @@
     {% endif %}
 
   </div>
+  <script src="{{ url_for('static', filename='js/rating.js') }}"></script>
 </body>
 </html>

@@ -2,11 +2,13 @@
 import os
 import sys
 import json
+import secrets
 import subprocess
 import importlib.util
 import time
+import requests
 from datetime import datetime, timedelta
-from flask import Flask, render_template, jsonify, redirect, url_for, flash, request
+from flask import Flask, render_template, jsonify, redirect, url_for, flash, request, session
 from math import ceil
 from dotenv import load_dotenv
 from urllib.parse import quote
@@ -14,6 +16,7 @@ from urllib.parse import quote
 load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 from urllib.parse import unquote
+import trakt_oauth
 
 APP = Flask(__name__, template_folder='templates')
 APP.secret_key = os.getenv('FLASK_SECRET', 'dev-secret')
@@ -494,6 +497,119 @@ def index(params=None):
 
     return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats,
                            all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, view_mode=view_mode)
+
+
+@APP.route('/auth/login')
+def login():
+    if not trakt_oauth.REDIRECT_URI:
+        flash('TRAKT_REDIRECT_URI is not configured; login is unavailable.', 'error')
+        return redirect(url_for('index'))
+    state = secrets.token_urlsafe(32)
+    session['oauth_state'] = state
+    return redirect(trakt_oauth.build_authorize_url(state))
+
+
+@APP.route('/auth/trakt/callback')
+def trakt_callback():
+    expected_state = session.pop('oauth_state', None)
+    state = request.args.get('state')
+    if not state or state != expected_state:
+        flash('Login failed: invalid OAuth state.', 'error')
+        return redirect(url_for('index'))
+
+    code = request.args.get('code')
+    if not code:
+        flash('Login was cancelled or denied.', 'error')
+        return redirect(url_for('index'))
+
+    token_data = trakt_oauth.exchange_code_for_token(code)
+    if not token_data:
+        flash('Login failed: could not exchange authorization code.', 'error')
+        return redirect(url_for('index'))
+
+    username = trakt_oauth.fetch_authenticated_username(token_data.get('access_token'))
+    if not username:
+        flash('Login failed: could not verify Trakt account.', 'error')
+        return redirect(url_for('index'))
+
+    if username not in ALL_USERS:
+        flash('This Trakt account is not configured for this site.', 'error')
+        return redirect(url_for('index'))
+
+    trakt_oauth.save_token(username, token_data)
+    session['trakt_user'] = username
+    session['csrf_token'] = secrets.token_urlsafe(32)
+    flash(f'Logged in as {username}.', 'success')
+    return redirect(url_for('index', user=username))
+
+
+@APP.route('/auth/logout')
+def logout():
+    session.pop('trakt_user', None)
+    session.pop('csrf_token', None)
+    flash('Logged out.', 'success')
+    return redirect(url_for('index'))
+
+
+@APP.route('/rate', methods=['POST'])
+def rate():
+    logged_in_user = session.get('trakt_user')
+    if not logged_in_user:
+        return jsonify({'error': 'not logged in'}), 401
+
+    csrf_token = request.headers.get('X-CSRF-Token')
+    if not csrf_token or csrf_token != session.get('csrf_token'):
+        return jsonify({'error': 'invalid csrf token'}), 403
+
+    payload = request.get_json(silent=True) or {}
+    item_type = payload.get('type')
+    trakt_id = payload.get('trakt_id')
+    rating = payload.get('rating')
+
+    if item_type not in ('movie', 'episode'):
+        return jsonify({'error': 'invalid type'}), 400
+    try:
+        trakt_id = int(trakt_id)
+        rating = int(rating)
+    except (TypeError, ValueError):
+        return jsonify({'error': 'invalid trakt_id or rating'}), 400
+    if not 1 <= rating <= 10:
+        return jsonify({'error': 'rating must be between 1 and 10'}), 400
+
+    access_token = trakt_oauth.get_valid_access_token(logged_in_user)
+    if not access_token:
+        session.pop('trakt_user', None)
+        return jsonify({'error': 'session expired, please log in again'}), 401
+
+    body_key = 'movies' if item_type == 'movie' else 'episodes'
+    response = requests.post(
+        'https://api.trakt.tv/sync/ratings',
+        json={body_key: [{'ids': {'trakt': trakt_id}, 'rating': rating}]},
+        headers=trakt_oauth.build_headers(access_token),
+        timeout=30,
+    )
+    if response.status_code not in (200, 201):
+        return jsonify({'error': f'Trakt rejected the rating ({response.status_code})'}), 502
+
+    _set_local_rating(logged_in_user, item_type, trakt_id, rating)
+    return jsonify({'success': True, 'rating': rating})
+
+
+def _set_local_rating(username: str, item_type: str, trakt_id: int, rating: int) -> None:
+    """Patch the matching item's rating in this user's local history file."""
+    data_path = get_user_data_path(username)
+    if not os.path.exists(data_path):
+        return
+    with open(data_path, 'r') as f:
+        data = json.load(f)
+    changed = False
+    for it in data.get('items', []):
+        if it.get('type') == item_type and (it.get('ids') or {}).get('trakt') == trakt_id:
+            it['rating'] = rating
+            changed = True
+    if changed:
+        with open(data_path, 'w') as f:
+            json.dump(data, f, indent=2)
 
 
 @APP.route('/api/history')
