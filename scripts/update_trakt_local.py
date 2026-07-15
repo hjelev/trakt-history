@@ -33,6 +33,11 @@ else:
 
 MAIN_PY = os.path.join(TRAKT_DIR, 'main.py')
 
+import sys
+if TRAKT_DIR not in sys.path:
+    sys.path.insert(0, TRAKT_DIR)
+import trakt_oauth
+
 # Load environment to get primary user
 load_dotenv(os.path.join(TRAKT_DIR, '.env'))
 PRIMARY_USER = os.getenv('PRIMARY_USER')
@@ -208,26 +213,27 @@ def main():
         if username == PRIMARY_USER:
             # Use authenticated sync endpoint for primary user
             # Use direct HTTP API calls instead of trakt.py library to avoid None returns
-            
-            # Get access token from the token file
-            token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
-            access_token = None
-            if os.path.exists(token_file_path):
-                with open(token_file_path, 'r') as f:
-                    token_data = json.load(f)
-                    access_token = token_data.get('access_token')
-            
+
+            # Get access token from the same per-user store the web login uses,
+            # refreshing it if needed. This is a persisted, service-level token
+            # (independent of any browser session) that the scheduler keeps alive.
+            access_token = trakt_oauth.get_valid_access_token(PRIMARY_USER)
+            if not access_token:
+                raise SystemExit(
+                    f'No Trakt token for primary user {PRIMARY_USER} - log in once via '
+                    f'"Log in with Trakt" on the site to enable background updates'
+                )
+
             headers = {
                 'Content-Type': 'application/json',
                 'trakt-api-version': '2',
                 'trakt-api-key': trakt_main.CLIENT_ID,
+                'Authorization': f'Bearer {access_token}',
             }
-            if access_token:
-                headers['Authorization'] = f'Bearer {access_token}'
-            
+
             all_items = []
             page = 1
-            
+
             while True:
                 url = 'https://api.trakt.tv/sync/history'
                 params = {
@@ -237,9 +243,12 @@ def main():
                 }
 
                 response = requests.get(url, headers=headers, params=params, timeout=60)
-                
+
                 if response.status_code == 401:
-                    raise SystemExit(f'Authentication failed for primary user - check token in trakt.json')
+                    raise SystemExit(
+                        f'Authentication failed for primary user {PRIMARY_USER} - '
+                        f're-login via "Log in with Trakt" on the site'
+                    )
                 elif response.status_code != 200:
                     raise SystemExit(f'API error {response.status_code}: {response.text}')
                 
@@ -266,23 +275,13 @@ def main():
             # Use public user history endpoint for other users
             # trakt.py doesn't support dynamic user IDs, so we'll use direct HTTP
             # (requests is already imported at module level)
-            
-            # Get access token from the token file
-            token_file_path = os.path.join(TRAKT_DIR, 'trakt.json')
-            access_token = None
-            if os.path.exists(token_file_path):
-                with open(token_file_path, 'r') as f:
-                    token_data = json.load(f)
-                    access_token = token_data.get('access_token')
-            
+            # This endpoint is public and needs no token.
             headers = {
                 'Content-Type': 'application/json',
                 'trakt-api-version': '2',
                 'trakt-api-key': trakt_main.CLIENT_ID,
             }
-            if access_token:
-                headers['Authorization'] = f'Bearer {access_token}'
-            
+
             all_items = []
             page = 1
             

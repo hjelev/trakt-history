@@ -90,42 +90,51 @@ def _refresh_token(token_data):
 
 def authenticate():
     """
-    Authenticate with Trakt using stored token.
-    Returns True if authentication successful, False otherwise.
+    Configure the shared Trakt client, best-effort attaching the legacy
+    device-flow OAuth token from trakt.json for any callers that still use
+    the trakt.py library directly (e.g. public shows/seasons enrichment
+    calls, which only need the client id/key, not OAuth).
+
+    trakt.json is no longer the source of truth for any per-user private
+    API calls (those use trakt_oauth.py's per-user token store instead), so
+    a missing/expired/unrefreshable device-flow token here is non-fatal.
+    Returns True as long as CLIENT_ID/CLIENT_SECRET are configured; False
+    only if those are missing (a real configuration error).
     """
     if not CLIENT_ID or not CLIENT_SECRET:
         print("Error: TRAKT_CLIENT_ID and TRAKT_CLIENT_SECRET must be set in .env")
         return False
-    
+
     Trakt.configuration.defaults.client(id=CLIENT_ID, secret=CLIENT_SECRET)
-    
+
     if not os.path.exists(TOKEN_FILE):
-        print(f"Error: Token file {TOKEN_FILE} not found. Run authenticate.py first.")
-        return False
-    
+        print(f"Warning: Token file {TOKEN_FILE} not found; continuing without legacy OAuth token.")
+        return True
+
     try:
         with open(TOKEN_FILE, 'r') as f:
             token_data = json.load(f)
-        
+
         if not token_data:
-            print(f"Error: Token file {TOKEN_FILE} is empty")
-            return False
+            print(f"Warning: Token file {TOKEN_FILE} is empty; continuing without legacy OAuth token.")
+            return True
 
         if _token_expired(token_data):
             print("Token expired; attempting refresh...")
             refreshed = _refresh_token(token_data)
             if not refreshed:
-                return False
+                print("Warning: legacy trakt.json token could not be refreshed; continuing without it.")
+                return True
             token_data = refreshed
-            
+
         Trakt.configuration.defaults.oauth.from_response(token_data)
         return True
     except json.JSONDecodeError as e:
-        print(f"Error: Invalid JSON in {TOKEN_FILE}: {e}")
-        return False
+        print(f"Warning: Invalid JSON in {TOKEN_FILE}: {e}; continuing without legacy OAuth token.")
+        return True
     except Exception as e:
-        print(f"Error loading token: {e}")
-        return False
+        print(f"Warning: error loading legacy token: {e}; continuing without it.")
+        return True
 
 
 if __name__ == "__main__":
