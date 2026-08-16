@@ -124,12 +124,15 @@ def start_scheduler():
         return None
     
     try:
-        # Schedule update every hour; next_run_time makes the first run happen
-        # immediately on service start instead of a full hour later (restarts
-        # used to keep pushing the next run out by another hour)
+        # Update every 4 hours; a full Chromium-based scrape per user is
+        # heavier on both the Pi and Trakt's servers than the old direct API
+        # calls, so this was widened from the previous hourly interval.
+        # next_run_time makes the first run happen immediately on service
+        # start instead of waiting a full interval (restarts used to keep
+        # pushing the next run out further).
         scheduler.add_job(
             update_all_users,
-            trigger=IntervalTrigger(hours=1),
+            trigger=IntervalTrigger(hours=4),
             id='update_all_users',
             name='Update Trakt history for all users',
             replace_existing=True,

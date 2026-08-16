@@ -429,8 +429,6 @@
       {% if session.trakt_user %}
       <span class="session-user">{{ session.trakt_user }}</span>
       <a href="{{ url_for('logout') }}" class="auth-link">Log out</a>
-      {% else %}
-      <a href="{{ url_for('login') }}" class="auth-link">Log in with Trakt</a>
       {% endif %}
 
     </div>
