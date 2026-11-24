@@ -33,6 +33,7 @@ if TRAKT_DIR not in sys.path:
     sys.path.insert(0, TRAKT_DIR)
 import trakt_scraper
 import tmdb_enrich
+import trakt_ratings
 
 # Load environment to get primary user
 load_dotenv(os.path.join(TRAKT_DIR, '.env'))
@@ -107,6 +108,8 @@ def main():
         print(f"Error scraping history from Trakt: {e}")
         import traceback
         traceback.print_exc()
+        # Ratings come from the API and don't depend on the scrape
+        trakt_ratings.sync_user(username)
         raise SystemExit(f'Failed to scrape history: {e}')
 
     if not history_objs:
@@ -376,9 +379,6 @@ def main():
                 print(f"  Using only newly processed items")
                 simplified = simplified_new
 
-    rated_count = sum(1 for item in simplified if item.get('rating') is not None)
-    print(f"Ratings: {rated_count}/{len(simplified)} items rated in output (ratings are no longer synced from Trakt; existing ratings are preserved)")
-
     os.makedirs(os.path.dirname(OUT_PATH), exist_ok=True)
 
     end_time = datetime.now()
@@ -399,6 +399,9 @@ def main():
     with open(OUT_PATH, 'w') as f:
         json.dump(out, f, indent=2)
     print(f'Wrote processed data: {OUT_PATH}')
+
+    print("\n=== Syncing ratings from Trakt ===")
+    trakt_ratings.sync_user(username)
 
     print(f'Generation time: {generation_time_seconds:.2f} seconds')
 

@@ -24,7 +24,7 @@ A modern Flask web application to view, search, and analyze your Trakt.tv watch 
 
 - Python 3.8 or higher
 - Trakt.tv account (free)
-- Trakt API credentials ([get them here](https://trakt.tv/oauth/applications))
+- A Trakt API app ([create one here](https://developer.trakt.tv/apps), free)
 - (Optional) RatingPosterDB API key for poster thumbnails
 
 ## 🚀 Quick Start
@@ -47,13 +47,12 @@ pip install -r requirements.txt
 ### 2. Configure Trakt API
 
 **Get your API credentials:**
-1. Visit [Trakt API Applications](https://trakt.tv/oauth/applications)
-2. Click "New Application"
-3. Fill in the form:
-   - **Name**: My Trakt History Viewer
-   - **Redirect URI**: `urn:ietf:wg:oauth:2.0:oob`
-4. Click "Save App"
-5. Copy your **Client ID** and **Client Secret**
+1. Open [My Apps](https://developer.trakt.tv/apps) on Trakt's developer portal and connect your GitHub account (required, no VIP needed)
+2. Create a **Development** app with the redirect URI `https://your-site/auth/trakt/callback` (add `http://localhost:5000/auth/trakt/callback` for local testing)
+3. Invite every other user who should be able to log in as a **Member** of the app (up to 16)
+4. Copy the **Client ID**. New apps have no client secret; login uses PKCE and doesn't need one
+
+Trakt deletes apps that go 30 days without use. The scheduler's ratings sync counts as use.
 
 **Configure environment:**
 
@@ -69,7 +68,7 @@ Add your credentials to `.env`:
 
 ```bash
 TRAKT_CLIENT_ID=your_client_id_here
-TRAKT_CLIENT_SECRET=your_client_secret_here
+TRAKT_REDIRECT_URI=https://your-site/auth/trakt/callback
 FLASK_SECRET=your_random_secret_key_here
 CACHE_DURATION=3600
 PORT=5000
@@ -355,7 +354,9 @@ RPDB_API_KEY=your_key        # For poster thumbnails
 ## 🎨 Features in Detail
 
 ### Personal Ratings
-Ratings from Trakt.tv are collected for every configured user — `PRIMARY_USER` and each of `ADDITIONAL_USERS` — provided that user's Trakt ratings are public. Each item's ⭐ badge is shown next to that user's name badge in the "All" view. Only items that user has rated will show the badge.
+Every configured user's Trakt ratings are shown next to their watches. They are synced on each scheduler run, when a user logs in, or by hand with `python trakt_ratings.py [username]`. A user's ratings must be public unless they have logged in on the site.
+
+Configured users can **Log in with Trakt** and rate the titles in their own history; the rating is saved to their Trakt account and shown immediately. An episode without its own rating shows its show's rating.
 
 ### Poster Thumbnails
 High-quality poster images are loaded directly from RatingPosterDB CDN when you provide an API key. The app generates optimized image URLs for fast loading without local storage.
@@ -372,9 +373,10 @@ Plain CSS (`static/css/site.css`), no framework; adapts to any screen size and t
 ## 🐛 Troubleshooting
 
 **Authentication fails:**
-- Verify your Client ID and Secret in `.env`
-- Make sure redirect URI is set to `urn:ietf:wg:oauth:2.0:oob`
-- Delete `trakt.json` and re-run `python authenticate.py`
+- `client not found`: Trakt deleted the app; create a new one and update `TRAKT_CLIENT_ID`
+- `TRAKT_REDIRECT_URI` must match the app's redirect URI exactly
+- Users other than the app's owner must be Members of the Development app
+- Free Trakt accounts can connect one community app at a time
 
 **No posters showing:**
 - Check if you have RPDB_API_KEY in `.env`

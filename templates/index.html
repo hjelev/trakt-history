@@ -91,6 +91,8 @@
 
       {% if session.trakt_user %}
       <p class="session">{{ session.trakt_user }} <a href="{{ url_for('logout') }}">Log out</a></p>
+      {% elif login_enabled %}
+      <p class="session"><a href="{{ url_for('login') }}">Log in with Trakt</a></p>
       {% endif %}
     </div>
   </div>
@@ -162,6 +164,7 @@
       <a href="https://github.com/hjelev/trakt-history" target="_blank" rel="noopener">GitHub</a>
       <a href="https://masoko.net" target="_blank" rel="noopener">masoko.net</a>
     </p>
+    <p class="foot-links"><span>This site uses Trakt but is not endorsed or certified by Trakt.</span></p>
   </footer>
 
   {% if session.trakt_user %}<script src="{{ url_for('static', filename='js/rating.js') }}"></script>{% endif %}

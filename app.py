@@ -6,7 +6,6 @@ import secrets
 import subprocess
 import importlib.util
 import time
-import requests
 from datetime import datetime, timedelta
 from flask import Flask, render_template, jsonify, redirect, url_for, flash, request, session
 from math import ceil
@@ -17,9 +16,13 @@ load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '.env'))
 
 from urllib.parse import unquote
 import trakt_oauth
+import trakt_ratings
 
 APP = Flask(__name__, template_folder='templates')
-APP.secret_key = os.getenv('FLASK_SECRET', 'dev-secret')
+# The key signs login sessions, so there is no guessable default: without
+# FLASK_SECRET a random one is used and logins end when the app restarts.
+APP.secret_key = os.getenv('FLASK_SECRET') or secrets.token_hex(32)
+APP.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
 # NOTE: Background updates are handled by a dedicated systemd service running
 # scheduler.py (trakt-scheduler.service), independent of this web app. The web
@@ -452,10 +455,14 @@ def index(params=None):
         from collections import defaultdict
         calendar_items_dict = defaultdict(list)
         for it in items_all:
-            watched_date = (it.get('watched_at') or '').split(' ')[0] if it.get('watched_at') else 'Unknown'
+            watched_date = (it.get('watched_at') or '').split(' ')[0]
+            # No date, or Trakt's 1970 epoch placeholder: one shared bucket
+            if not watched_date or watched_date < '1971':
+                watched_date = 'Unknown'
             calendar_items_dict[watched_date].append(it)
-        # Sort dates in reverse (most recent first)
-        sorted_dates = sorted(calendar_items_dict.keys(), reverse=True)
+        # Most recent first, undated watches last
+        sorted_dates = sorted(calendar_items_dict.keys(),
+                              key=lambda d: '' if d == 'Unknown' else d, reverse=True)
         
         # Paginate by date
         total = len(sorted_dates)
@@ -550,24 +557,26 @@ def index(params=None):
 
     return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats,
                            all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, view_mode=view_mode,
+                           login_enabled=trakt_oauth.is_configured(),
                            latest=latest_by_user(all_items) if selected_user == ALL_USERS_KEY else {})
 
 
 @APP.route('/auth/login')
 def login():
-    if not trakt_oauth.REDIRECT_URI:
-        flash('TRAKT_REDIRECT_URI is not configured; login is unavailable.', 'error')
+    if not trakt_oauth.is_configured():
+        flash('Trakt login is not configured on this site.', 'error')
         return redirect(url_for('index'))
-    state = secrets.token_urlsafe(32)
-    session['oauth_state'] = state
-    return redirect(trakt_oauth.build_authorize_url(state))
+    session['oauth_state'] = secrets.token_urlsafe(32)
+    session['oauth_verifier'] = trakt_oauth.new_code_verifier()
+    return redirect(trakt_oauth.build_authorize_url(session['oauth_state'], session['oauth_verifier']))
 
 
 @APP.route('/auth/trakt/callback')
 def trakt_callback():
     expected_state = session.pop('oauth_state', None)
+    verifier = session.pop('oauth_verifier', None)
     state = request.args.get('state')
-    if not state or state != expected_state:
+    if not state or not verifier or state != expected_state:
         flash('Login failed: invalid OAuth state.', 'error')
         return redirect(url_for('index'))
 
@@ -576,23 +585,31 @@ def trakt_callback():
         flash('Login was cancelled or denied.', 'error')
         return redirect(url_for('index'))
 
-    token_data = trakt_oauth.exchange_code_for_token(code)
+    token_data = trakt_oauth.exchange_code_for_token(code, verifier)
     if not token_data:
         flash('Login failed: could not exchange authorization code.', 'error')
         return redirect(url_for('index'))
 
-    username = trakt_oauth.fetch_authenticated_username(token_data.get('access_token'))
-    if not username:
+    names = trakt_oauth.fetch_authenticated_usernames(token_data['access_token'])
+    if not names:
         flash('Login failed: could not verify Trakt account.', 'error')
         return redirect(url_for('index'))
 
-    if username not in ALL_USERS:
+    # Trakt names are case-insensitive; use the spelling from .env
+    configured = {u.lower(): u for u in ALL_USERS}
+    username = next((configured[n.lower()] for n in names if n.lower() in configured), None)
+    if not username:
         flash('This Trakt account is not configured for this site.', 'error')
         return redirect(url_for('index'))
 
     trakt_oauth.save_token(username, token_data)
     session['trakt_user'] = username
     session['csrf_token'] = secrets.token_urlsafe(32)
+    try:
+        trakt_ratings.sync_user(username)
+    except Exception as e:
+        # The scheduler will pick the ratings up; don't fail the login over it
+        APP.logger.warning('Ratings sync after login failed for %s: %s', username, e)
     flash(f'Logged in as {username}.', 'success')
     return redirect(url_for('index', user=username))
 
@@ -630,40 +647,16 @@ def rate():
     if not 1 <= rating <= 10:
         return jsonify({'error': 'rating must be between 1 and 10'}), 400
 
-    access_token = trakt_oauth.get_valid_access_token(logged_in_user)
-    if not access_token:
-        session.pop('trakt_user', None)
-        return jsonify({'error': 'session expired, please log in again'}), 401
+    try:
+        trakt_ratings.push_rating(logged_in_user, item_type, trakt_id, rating)
+    except trakt_ratings.RatingError as e:
+        if e.status == 401:
+            session.pop('trakt_user', None)
+            session.pop('csrf_token', None)
+        return jsonify({'error': str(e)}), e.status
 
-    body_key = 'movies' if item_type == 'movie' else 'episodes'
-    response = requests.post(
-        'https://api.trakt.tv/sync/ratings',
-        json={body_key: [{'ids': {'trakt': trakt_id}, 'rating': rating}]},
-        headers=trakt_oauth.build_headers(access_token),
-        timeout=30,
-    )
-    if response.status_code not in (200, 201):
-        return jsonify({'error': f'Trakt rejected the rating ({response.status_code})'}), 502
-
-    _set_local_rating(logged_in_user, item_type, trakt_id, rating)
+    trakt_ratings.set_local_rating(logged_in_user, item_type, trakt_id, rating)
     return jsonify({'success': True, 'rating': rating})
-
-
-def _set_local_rating(username: str, item_type: str, trakt_id: int, rating: int) -> None:
-    """Patch the matching item's rating in this user's local history file."""
-    data_path = get_user_data_path(username)
-    if not os.path.exists(data_path):
-        return
-    with open(data_path, 'r') as f:
-        data = json.load(f)
-    changed = False
-    for it in data.get('items', []):
-        if it.get('type') == item_type and (it.get('ids') or {}).get('trakt') == trakt_id:
-            it['rating'] = rating
-            changed = True
-    if changed:
-        with open(data_path, 'w') as f:
-            json.dump(data, f, indent=2)
 
 
 @APP.route('/api/history')
