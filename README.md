@@ -6,7 +6,6 @@ A modern Flask web application to view, search, and analyze your Trakt.tv watch 
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![Flask](https://img.shields.io/badge/flask-3.0+-green.svg)](https://flask.palletsprojects.com/)
-[![Bootstrap 5](https://img.shields.io/badge/bootstrap-5.3-purple.svg)](https://getbootstrap.com/)
 
 </div>
 
@@ -18,7 +17,7 @@ A modern Flask web application to view, search, and analyze your Trakt.tv watch 
 - ⭐ **Personal Ratings** - Display your ratings from Trakt on each poster
 - 🖼️ **Beautiful Posters** - High-quality poster thumbnails from RatingPosterDB
 - 📊 **Statistics** - Watch analytics and insights
-- 🎨 **Modern UI** - Responsive Bootstrap 5 interface with card-based layout
+- 🎨 **Modern UI** - Colour-bar design with one colour per person, light and dark themes
 - ⚡ **Fast Performance** - Local caching with smart update strategies
 
 ## 📋 Requirements
@@ -320,7 +319,7 @@ trakt-history/
 
 **Query Parameters for `/api/history`:**
 - `page` - Page number (default: 1)
-- `per_page` - Items per page (default: 20)
+- `per_page` - Items per page (default: 24)
 - `search` - Search query
 - `genre` - Filter by genre
 - `actor` - Filter by actor name
@@ -368,7 +367,7 @@ High-quality poster images are loaded directly from RatingPosterDB CDN when you 
 - Fast subsequent loads
 
 ### Responsive Design
-Bootstrap 5 provides a modern, mobile-friendly interface that adapts to any screen size.
+Plain CSS (`static/css/site.css`), no framework; adapts to any screen size and to light or dark mode.
 
 ## 🐛 Troubleshooting
 
@@ -410,4 +409,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - [Trakt.tv](https://trakt.tv) - Watch history tracking
 - [RatingPosterDB](https://ratingposterdb.com) - High-quality poster images
 - [Flask](https://flask.palletsprojects.com/) - Web framework
-- [Bootstrap 5](https://getbootstrap.com/) - UI framework

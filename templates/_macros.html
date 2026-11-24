@@ -1,0 +1,48 @@
+{# One title: poster, heading, details and who watched it. Used by both views. #}
+{% macro card(it, q, selected_user, all_users, session, eager=false) %}
+{% set is_episode = it.type == 'episode' %}
+{% set name = (it.show.title if is_episode and it.show and it.show.title else it.title) or 'Untitled' %}
+{% set imdb = it.ids.imdb if it.ids else none %}
+{% set trakt_id = it.ids.trakt if it.ids else none %}
+{% set watchers = it.watchers or [{'user': it._user or selected_user, 'rating': it.rating, 'watched_at': it.watched_at, 'plays': 1}] %}
+<article class="card" style="--c:var(--bar-{{ all_users.index(watchers[0].user) % 6 if watchers[0].user in all_users else 0 }})">
+  <{% if imdb %}a href="https://www.imdb.com/title/{{ imdb }}/" target="_blank" rel="noopener noreferrer"{% else %}div{% endif %} class="card-link">
+    <div class="poster">
+      <span class="poster-type" style="--size:{{ name|poster_type_size }}cqi" aria-hidden="true">{{ name }}</span>
+      {% if it.thumbnail %}<img src="{{ it.thumbnail }}" alt="" width="300" height="450"{% if not eager %} loading="lazy"{% endif %} onerror="this.remove()">{% endif %}
+      {% if selected_user == 'all' %}
+      <span class="poster-bars" aria-hidden="true">{% for w in watchers %}<i style="--c:var(--bar-{{ all_users.index(w.user) % 6 if w.user in all_users else 0 }})"></i>{% endfor %}</span>
+      {% endif %}
+    </div>
+    <h3 class="card-title">{{ name }}{% if imdb %}<span class="sr-only"> on IMDb</span>{% endif %}</h3>
+  </{% if imdb %}a{% else %}div{% endif %}>
+
+  {% if is_episode %}<p class="card-episode">S{{ it.season if it.season is not none else '?' }} E{{ it.number if it.number is not none else '?' }}{% if it.title and it.title != name %} <span>{{ it.title }}</span>{% endif %}</p>{% endif %}
+  <p class="card-meta">{% if it.year %}<span>{{ it.year }}</span>{% endif %}{% if it.runtime %}<span>{{ it.runtime|runtime }}</span>{% endif %}</p>
+
+  <ul class="watchers">
+    {% for w in watchers %}
+    {% set own = session.trakt_user and w.user == session.trakt_user and it.type in ('movie', 'episode') and trakt_id %}
+    <li style="--c:var(--bar-{{ all_users.index(w.user) % 6 if w.user in all_users else 0 }})">
+      <span class="watcher" title="Watched {{ w.watched_at }}">
+        {% if selected_user == 'all' %}<b>{{ w.user }}</b>{% endif %}
+        <time datetime="{{ (w.watched_at or '')[:10] }}">{{ w.watched_at|nice_date }}</time>
+        {% if w.plays > 1 %}<span>{{ w.plays }} times</span>{% endif %}
+      </span>
+      {% if not own and w.rating is not none %}<span class="score" aria-label="Rated {{ w.rating }} out of 10">★ {{ w.rating }}</span>{% endif %}
+      {% if own %}<span class="rating-widget" data-type="{{ it.type }}" data-trakt-id="{{ trakt_id }}" data-current="{{ w.rating or 0 }}" data-title="{{ name }}"></span>{% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+
+  {% if it.genres %}
+  <p class="card-genres">{% for g in it.genres[:3] %}<a href="{{ clean_url('index', **dict(q, genre=g, page=1)) }}">{{ g|replace('-', ' ') }}</a>{% endfor %}</p>
+  {% endif %}
+  {% if it.cast %}
+  <details class="card-cast">
+    <summary>Cast</summary>
+    {% for a in it.cast %}<a href="{{ clean_url('index', **dict(q, actor=a, page=1)) }}">{{ a }}</a>{% endfor %}
+  </details>
+  {% endif %}
+</article>
+{% endmacro %}

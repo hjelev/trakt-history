@@ -37,6 +37,10 @@ ALL_USERS_KEY = 'all'  # sentinel selecting the combined cross-profile view
 DATA_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '_data'))
 CACHE_DURATION = int(os.getenv('CACHE_DURATION', 3600))
 
+# 24 fills whole rows at 2, 3, 4, 6 and 8 columns
+DEFAULT_PER_PAGE = 24
+PER_PAGE_OPTIONS = [24, 48, 96]
+
 
 @APP.template_filter('clean_url')
 def clean_url_filter(endpoint, **kwargs):
@@ -50,7 +54,7 @@ def clean_url_filter(endpoint, **kwargs):
     # Defaults to skip
     defaults = {
         'page': 1,
-        'per_page': 10,
+        'per_page': DEFAULT_PER_PAGE,
         'media': 'both',
         'period': 'all',
         'view': 'gallery',
@@ -88,6 +92,54 @@ def clean_url_filter(endpoint, **kwargs):
 
 
 APP.jinja_env.globals['clean_url'] = clean_url_filter
+
+
+@APP.template_filter('nice_date')
+def nice_date_filter(value, style='short'):
+    """'2026-08-14 22:43' -> '14 Aug' ('14 Aug 2025' for other years).
+
+    style='long' gives '14 August 2026', style='weekday' the day name.
+    Trakt uses the 1970 epoch for watches logged without a date.
+    """
+    try:
+        dt = datetime.strptime((value or '')[:10], '%Y-%m-%d')
+    except ValueError:
+        dt = None
+    if dt is None or dt.year <= 1970:
+        return '' if style == 'weekday' else 'Date unknown'
+    if style == 'weekday':
+        return dt.strftime('%A')
+    if style == 'long':
+        return f"{dt.day} {dt.strftime('%B %Y')}"
+    if dt.year == datetime.now().year:
+        return f"{dt.day} {dt.strftime('%b')}"
+    return f"{dt.day} {dt.strftime('%b %Y')}"
+
+
+@APP.template_filter('runtime')
+def runtime_filter(minutes):
+    """173 -> '2h 53m'"""
+    try:
+        h, m = divmod(int(minutes or 0), 60)
+    except (TypeError, ValueError):
+        return ''
+    return ' '.join(p for p in (f'{h}h' if h else '', f'{m}m' if m else '') if p)
+
+
+@APP.template_filter('poster_type_size')
+def poster_type_size_filter(title):
+    """Type size (in % of poster width) that lets a title fill the stand-in poster."""
+    title = title or '?'
+    longest = max((len(w) for w in title.split()), default=1)
+    return round(min(42, 195 / longest, 125 / len(title) ** 0.5), 1)
+
+
+def latest_by_user(items):
+    """Most recent item per owner from a watched_at-desc, owner-tagged feed."""
+    latest = {}
+    for it in items:
+        latest.setdefault(it.get('_user'), it)
+    return latest
 
 
 def get_user_data_path(username: str = None):
@@ -210,11 +262,11 @@ def index(params=None):
     except Exception:
         page = 1
     try:
-        per_page = int(args.get('per_page', 10))
+        per_page = int(args.get('per_page', DEFAULT_PER_PAGE))
         if per_page <= 0:
-            per_page = 10
+            per_page = DEFAULT_PER_PAGE
     except Exception:
-        per_page = 10
+        per_page = DEFAULT_PER_PAGE
 
     # optional genre filter
     genre = args.get('genre')
@@ -439,7 +491,8 @@ def index(params=None):
         'calendar_items': calendar_items,
     }
 
-    per_page_options = [10, 25, 50, 100]
+    # Keep a hand-typed or bookmarked page size selectable
+    per_page_options = sorted(set(PER_PAGE_OPTIONS) | {per_page})
     
     # Get unique years from all items for the year dropdown
     all_years = set()
@@ -496,7 +549,8 @@ def index(params=None):
     stats['rated_count'] = len(ratings)
 
     return render_template('index.html', data=paged, per_page_options=per_page_options, available_years=available_years, stats=stats,
-                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, view_mode=view_mode)
+                           all_users=ALL_USERS, selected_user=selected_user, primary_user=PRIMARY_USER, view_mode=view_mode,
+                           latest=latest_by_user(all_items) if selected_user == ALL_USERS_KEY else {})
 
 
 @APP.route('/auth/login')

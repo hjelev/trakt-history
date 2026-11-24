@@ -30,11 +30,11 @@ A Flask web application that displays, filters, and analyzes Trakt.tv watch hist
    - Outputs to `_data/trakt_history.json` (processed data) and `_data/trakt_raw.json` (raw API dump)
    - Caches raw API data to avoid redundant fetches; skips reprocessing if raw data unchanged
 
-5. **[templates/index.html](templates/index.html)** - Bootstrap 5 UI
-   - Responsive card grid with poster thumbnails, ratings overlay
-   - Dark mode auto-detect (CSS media query)
-   - Desktop: 240px cards; Mobile: 160px cards; <400px: 140px cards
-   - Real-time client-side filtering via JavaScript
+5. **[templates/index.html](templates/index.html)** - UI (no CSS framework)
+   - Colour bars at the top: one bar per user (`--bar-0`..`--bar-5`, by position in `ALL_USERS`), doubling as the profile switcher
+   - [templates/_macros.html](templates/_macros.html) renders one title card, shared by gallery and calendar
+   - [static/css/site.css](static/css/site.css) holds all styles; [static/js/rating.js](static/js/rating.js) the rating widget
+   - Filtering is server-side; build links with `clean_url('index', **dict(q, ...))`
 
 ### Data Flow
 
@@ -117,7 +117,7 @@ python app.py              # Starts Flask on http://localhost:5000
 ## Important Implementation Details
 
 - **Token management**: `main.py` checks `trakt.json` exists and is valid JSON before using; `trakt.py` lib handles OAuth refresh internally
-- **Pagination**: Server-side query string (`?page=X&per_page=Y`); defaults to page 1, 10 items
+- **Pagination**: Server-side query string (`?page=X&per_page=Y`); defaults to page 1, 24 items
 - **Search**: Case-insensitive substring match across title, show title (for episodes), cast, and exact year match
 - **Filtering stacking**: genre → actor → search → media type → time period → release year (applied sequentially on items_all)
 - **Episodes**: Stored as separate items with `type='episode'`, `show={'title': '...', 'year': ...}`, and enriched with show-level genres/year
@@ -138,6 +138,6 @@ python app.py              # Starts Flask on http://localhost:5000
 4. Use `--force` to reprocess without re-fetching
 
 ### Change UI styling
-- Edit `<style>` block in `index.html`
-- Responsive breakpoints: 720px (tablet), 400px (small mobile)
-- Dark mode CSS: `@media (prefers-color-scheme: dark)` section
+- Edit `static/css/site.css`
+- Responsive breakpoints: 1320px (toolbar), 820px (mobile bars), 400px
+- Light/dark: every token uses `light-dark()` in `:root`
